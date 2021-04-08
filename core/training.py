@@ -109,7 +109,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 if steps > total_steps_per_scale:
                     keep_training = False
                     break
-                if opt.debug_run and steps > 15:
+                if opt.debug_run and steps > 20:
                     keep_training = False
                     break
 

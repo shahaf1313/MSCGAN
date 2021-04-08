@@ -8,7 +8,7 @@ python3 ./main_train.py --scale_factor=0.5 --num_scales=5 --num_workers=16 --bat
 
 To train a semantic segmentation net after MSC-GAN model was trained, use train_semseg_pyramid.py. Exmaple for running command: 
 
-python3 ./train_semseg_pyramid.py --gpus=4 --multiscale_model_path=./GoldenModels/ConvGenerator/Gst.pth --batch_size=2 --scale_factor=0.5 --num_steps=200000 --model=VGG --tb_logs_dir=/home/shahaf/SinGAN/TrainSemseg/tb_runs .
+python3 ./train_semseg_pyramid.py --gpus=4 --multiscale_model_path=./GoldenModels/ConvGenerator/Gst.pth --batch_size=2 --scale_factor=0.5 --num_steps=200000 --model=VGG --tb_logs_dir=/home/shahaf/MSCGAN/TrainSemseg/tb_runs .
 
 Enjoy!
 Shahaf

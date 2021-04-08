@@ -323,5 +323,5 @@ class WDiscriminatorDownscale(nn.Module):
         x2 = self.l2(x1)
         x3 = self.l3(x2)
         x4 = self.l4(x3)
-        x5 = self.l5(x4)
-        return torch.mean(x5)
+        # x5 = self.l5(x4)
+        return torch.mean(x4)
