@@ -1,12 +1,12 @@
-from config import get_arguments, post_config
+from core.config import get_arguments, post_config
 import datetime
 from torch import nn
 from data import CreateSrcDataLoader, CreateTrgDataLoader
-from SinGAN.functions import denorm, colorize_mask
+from core.functions import denorm, colorize_mask
 import numpy as np
 import time
-from constants import NUM_CLASSES, IGNORE_LABEL, trainId2label
-from SinGAN.functions import compute_cm_batch_torch, compute_iou_torch, imresize_torch
+from core.constants import NUM_CLASSES, IGNORE_LABEL, trainId2label
+from core.functions import compute_cm_batch_torch, compute_iou_torch, imresize_torch
 import torch
 import os
 from torch.utils.tensorboard import SummaryWriter
@@ -15,7 +15,7 @@ def main():
     parser = get_arguments()
     opt = parser.parse_args()
     opt = post_config(opt)
-    from SemsegNetworks import CreateSemsegPyramidModel
+    from semseg_models import CreateSemsegPyramidModel
     criterion = torch.nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
     Gst = torch.load(os.path.join(opt.multiscale_model_path, 'Gst.pth'), map_location='cpu')
     Gts = torch.load(os.path.join(opt.multiscale_model_path, 'Gst.pth'), map_location='cpu')

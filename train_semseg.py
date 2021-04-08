@@ -1,10 +1,10 @@
-from SemsegNetworks import CreateSemsegModel
-from constants import NUM_CLASSES, IGNORE_LABEL, trainId2label
-from SinGAN.functions import compute_cm_batch_torch, compute_iou_torch, imresize_torch
+from semseg_models import CreateSemsegModel
+from core.constants import NUM_CLASSES, IGNORE_LABEL, trainId2label
+from core.functions import compute_cm_batch_torch, compute_iou_torch, imresize_torch
 from data import CreateSrcDataLoader, CreateTrgDataLoader
 import torch
-from config import get_arguments, post_config
-from SinGAN.functions import denorm, colorize_mask
+from core.config import get_arguments, post_config
+from core.functions import denorm, colorize_mask
 import numpy as np
 import time
 import os
@@ -25,7 +25,7 @@ def main():
 
     source_train_loader = CreateSrcDataLoader(opt, 'train', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
-    target_val_loader = CreateTrgDataLoader(opt, 'val', get_sacles_pyramid=True)
+    target_val_loader = CreateTrgDataLoader(opt, 'val', get_scales_pyramid=True)
 
     semseg_net, semseg_optimizer = CreateSemsegModel(opt)
     # semseg_scheduler = torch.optim.lr_scheduler.MultiStepLR(semseg_optimizer, milestones=np.arange(0, opt.num_epochs, 10), gamma=0.9)

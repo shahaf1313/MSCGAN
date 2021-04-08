@@ -2,10 +2,10 @@ import torch
 import numpy as np
 import torch.nn as nn
 import math
-# from skimage import io as img
-# from skimage import color
+from skimage import io as img
+from skimage import color
 from PIL import Image
-from constants import palette
+from core.constants import palette
 
 
 def denorm(x):
@@ -16,12 +16,6 @@ def denorm(x):
 def norm(x):
     out = (x - 0.5) * 2
     return out.clamp(-1, 1)
-
-
-def upsampling(im, sx, sy):
-    m = nn.Upsample(size=[round(sx), round(sy)], mode='bilinear', align_corners=True)
-    return m(im)
-
 
 def reset_grads(model, require_grad):
     for p in model.parameters():
@@ -64,21 +58,21 @@ def calc_gradient_penalty(netD, real_data, fake_data, LAMBDA, device):
     return gradient_penalty
 
 
-# def np2torch(x, opt):
-#     if opt.nc_im == 3:
-#         x = x[:, :, :, None]
-#         x = x.transpose((3, 2, 0, 1)) / 255
-#     else:
-#         x = color.rgb2gray(x)
-#         x = x[:, :, None, None]
-#         x = x.transpose(3, 2, 0, 1)
-#     x = torch.from_numpy(x)
-#     if not (opt.not_cuda):
-#         x = move_to_gpu(x)
-#     x = x.type(torch.cuda.FloatTensor) if not (opt.not_cuda) else x.type(torch.FloatTensor)
-#     # x = x.type(torch.FloatTensor)
-#     x = norm(x)
-#     return x
+def np2torch(x, opt):
+    if opt.nc_im == 3:
+        x = x[:, :, :, None]
+        x = x.transpose((3, 2, 0, 1)) / 255
+    else:
+        x = color.rgb2gray(x)
+        x = x[:, :, None, None]
+        x = x.transpose(3, 2, 0, 1)
+    x = torch.from_numpy(x)
+    if not (opt.not_cuda):
+        x = move_to_gpu(x)
+    x = x.type(torch.cuda.FloatTensor) if not (opt.not_cuda) else x.type(torch.FloatTensor)
+    # x = x.type(torch.FloatTensor)
+    x = norm(x)
+    return x
 
 
 def torch2uint8(x):
@@ -90,10 +84,10 @@ def torch2uint8(x):
     return x
 
 
-# def read_image2np(opt):
-#     x = img.imread('%s/%s' % (opt.input_dir, opt.input_name))
-#     x = x[:, :, 0:3]
-#     return x
+def read_image2np(opt):
+    x = img.imread('%s/%s' % (opt.input_dir, opt.input_name))
+    x = x[:, :, 0:3]
+    return x
 
 
 def save_networks(netDst, netGst, netDts, netGts, opt):
@@ -107,24 +101,6 @@ def adjust_scales2image(H, W, opt):
     opt.max_size = max(H, W)
     opt.min_size = math.ceil(min(H, W) * math.pow(opt.scale_factor, opt.num_scales))
     opt.stop_scale = opt.num_scales
-
-
-# def load_trained_pyramid(opt, mode_='train'):
-#     # dir = 'TrainedModels/%s/scale_factor=%f' % (opt.input_name[:-4], opt.scale_factor_init)
-#     mode = opt.mode
-#     opt.mode = 'train'
-#     if (mode == 'animation_train') | (mode == 'SR_train') | (mode == 'paint_train'):
-#         opt.mode = mode
-#     dir = generate_dir2save(opt)
-#     if (os.path.exists(dir)):
-#         Gs = torch.load('%s/Gs.pth' % dir)
-#         Zs = torch.load('%s/Zs.pth' % dir)
-#         reals = torch.load('%s/reals.pth' % dir)
-#         NoiseAmp = torch.load('%s/NoiseAmp.pth' % dir)
-#     else:
-#         print('no appropriate trained model is exist, please train first')
-#     opt.mode = mode
-#     return Gs, Zs, reals, NoiseAmp
 
 def colorize_mask(mask):
     # mask: tensor of the mask

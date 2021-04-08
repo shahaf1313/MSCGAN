@@ -1,9 +1,9 @@
-from SemsegNetworks.deeplab import Deeplab
-from SemsegNetworks.fcn8s import VGG16_FCN8s
+from semseg_models.deeplab import Deeplab
+from semseg_models.fcn8s import VGG16_FCN8s
 import torch.optim as optim
 import os
-from constants import NUM_CLASSES
-from SemsegNetworks.build import build_feature_extractor, build_classifier, ASPP_Classifier_V2
+from core.constants import NUM_CLASSES
+from semseg_models.build import build_feature_extractor, build_classifier, ASPP_Classifier_V2
 import torch
 
 def CreateSemsegModel(args):

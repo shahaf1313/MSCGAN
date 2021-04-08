@@ -1,5 +1,5 @@
 import numpy as np
-from constants import IGNORE_LABEL, IMG_CROP_SIZE
+from core.constants import IGNORE_LABEL, IMG_CROP_SIZE
 from PIL import Image
 import math
 import os.path as osp

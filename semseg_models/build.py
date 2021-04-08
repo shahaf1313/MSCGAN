@@ -1,9 +1,9 @@
-from SemsegNetworks.layers import FrozenBatchNorm2d
-from SemsegNetworks import vgg, resnet
+from semseg_models.layers import FrozenBatchNorm2d
+from semseg_models import vgg, resnet
 from torch import nn
 import torch.nn.functional as F
 from torchvision.models._utils import IntermediateLayerGetter
-from constants import NUM_CLASSES
+from core.constants import NUM_CLASSES
 
 def build_feature_extractor(model_name):
     _, backbone_name = model_name.split('_')

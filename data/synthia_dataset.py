@@ -1,4 +1,4 @@
-from constants import IGNORE_LABEL
+from core.constants import IGNORE_LABEL
 import os.path as osp
 from PIL import Image
 import numpy as np

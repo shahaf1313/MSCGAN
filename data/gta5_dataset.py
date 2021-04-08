@@ -2,7 +2,7 @@ import os.path as osp
 from data.domainAdaptationDataset import domainAdaptationDataSet
 from PIL import Image
 import numpy as np
-from constants import IMG_RESIZE
+from core.constants import IMG_RESIZE
 
 class GTA5DataSet(domainAdaptationDataSet):
     def __init__(self, root, list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False):

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from constants import IGNORE_LABEL, NUM_CLASSES
+from core.constants import IGNORE_LABEL, NUM_CLASSES
 
 class FCN8s(nn.Module):
     def __init__(self, num_classes=19):

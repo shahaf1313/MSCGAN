@@ -1,5 +1,5 @@
-import SinGAN.functions as functions
-import SinGAN.models as models
+import core.functions as functions
+import core.models as models
 import os
 import torch.nn as nn
 import torch.optim as optim
@@ -7,8 +7,8 @@ import torch.utils.data
 import math
 import numpy as np
 import time
-from constants import H, W
-from SinGAN.functions import imresize_torch
+from core.constants import H, W
+from core.functions import imresize_torch
 import datetime
 from torch.utils.tensorboard import SummaryWriter
 

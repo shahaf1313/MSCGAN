@@ -1,9 +1,9 @@
-from constants import H,W
+from core.constants import H,W
 from data import CreateSrcDataLoader
 from data import CreateTrgDataLoader
-from config import get_arguments, post_config
-from SinGAN.functions import adjust_scales2image
-from SinGAN.training import train
+from core.config import get_arguments, post_config
+from core.functions import adjust_scales2image
+from core.training import train
 import numpy as np
 
 if __name__ == '__main__':

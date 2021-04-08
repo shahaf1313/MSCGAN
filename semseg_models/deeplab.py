@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-from constants import IGNORE_LABEL, NUM_CLASSES
+from core.constants import IGNORE_LABEL, NUM_CLASSES
 from torch.autograd import Variable
 affine_par = True
 

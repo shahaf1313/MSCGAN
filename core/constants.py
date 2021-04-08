@@ -1,5 +1,3 @@
-import numpy as np
-
 NUM_CLASSES = 19
 IGNORE_LABEL = 255
 IMG_PIXELS_NUM = 512*1024*3
