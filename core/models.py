@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 class ConvBlock(nn.Sequential):
@@ -24,14 +25,12 @@ class WDiscriminator(nn.Module):
     def __init__(self, opt):
         super(WDiscriminator, self).__init__()
         self.is_cuda = torch.cuda.is_available()
-        N = int(opt.nfc)
-        self.head = ConvBlock(opt.nc_im, N, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
         self.body = nn.Sequential()
         for i in range(opt.num_layer-2):
-            N = int(opt.nfc/pow(2,(i+1)))
-            block = ConvBlock(max(2*N,opt.min_nfc), max(N,opt.min_nfc), opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
             self.body.add_module('block%d'%(i+1),block)
-        self.tail = nn.Sequential(nn.Conv2d(max(N,opt.min_nfc),1,kernel_size=opt.ker_size,stride=1,padding=1),
+        self.tail = nn.Sequential(nn.Conv2d(opt.base_channels,1,kernel_size=opt.ker_size,stride=1,padding=1),
                                   nn.LeakyReLU(0.2))
 
     def forward(self,x):
@@ -46,18 +45,15 @@ class WDiscriminator(nn.Module):
 class ConvGenerator(nn.Module):
     def __init__(self, opt):
         super(ConvGenerator, self).__init__()
-        self.is_cuda = torch.cuda.is_available()
-        N = opt.nfc
         self.is_initial_scale = opt.curr_scale == 0
         alpha = 1 if self.is_initial_scale else 0
-        self.head = ConvBlock((2-alpha)*opt.nc_im, N, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type) #GenConvTransBlock(opt.nc_z,N,opt.ker_size,opt.padd_size,opt.stride)
+        self.head = ConvBlock((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type) #GenConvTransBlock(opt.nc_z,N,opt.ker_size,opt.padd_size,opt.stride)
         self.body = nn.Sequential()
         for i in range(opt.num_layer-2):
-            N = int(opt.nfc/pow(2,(i+1)))
-            block = ConvBlock(max(2*N,opt.min_nfc), max(N,opt.min_nfc), opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
+            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
             self.body.add_module('block%d'%(i+1),block)
         self.tail = nn.Sequential(
-            nn.Conv2d(max(N,opt.min_nfc), opt.nc_im, kernel_size=opt.ker_size, stride=1, padding=1),
+            nn.Conv2d(opt.base_channels, opt.nc_im, kernel_size=opt.ker_size, stride=1, padding=1),
             nn.Tanh()
         )
     def forward(self, curr_scale, prev_scale):
@@ -281,37 +277,35 @@ class LocalNet(nn.Module):
 class WDiscriminatorDownscale(nn.Module):
     def __init__(self, opt):
         super(WDiscriminatorDownscale, self).__init__()
-        N = int(opt.nfc/32)
-        base_channels = max(N,opt.min_nfc)
 
         self.l0 = nn.Sequential(
-            nn.Conv2d(3, base_channels, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(base_channels),
+            nn.Conv2d(opt.nc_im, opt.base_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(opt.base_channels),
             nn.LeakyReLU()
         )
         self.l1 = nn.Sequential(
-            nn.Conv2d(base_channels, base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(base_channels),
+            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(opt.base_channels),
             nn.LeakyReLU()
         )
         self.l2 = nn.Sequential(
-            nn.Conv2d(base_channels, base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(base_channels),
+            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(opt.base_channels),
             nn.LeakyReLU()
         )
         self.l3 = nn.Sequential(
-            nn.Conv2d(base_channels, base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(base_channels),
+            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(opt.base_channels),
             nn.LeakyReLU()
         )
         self.l4 = nn.Sequential(
-            nn.Conv2d(base_channels, base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(base_channels),
+            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(opt.base_channels),
             nn.LeakyReLU()
         )
         self.l5 = nn.Sequential(
-            nn.Conv2d(base_channels, base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(base_channels),
+            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(opt.base_channels),
             nn.LeakyReLU()
         )
 
@@ -324,4 +318,4 @@ class WDiscriminatorDownscale(nn.Module):
         x3 = self.l3(x2)
         x4 = self.l4(x3)
         # x5 = self.l5(x4)
-        return torch.mean(x4)
+        return x4

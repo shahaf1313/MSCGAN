@@ -4,7 +4,7 @@ import os
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
-import math
+from core.constants import MAX_CHANNELS_PER_LAYER
 import numpy as np
 import time
 from core.constants import H, W
@@ -29,8 +29,8 @@ def train(opt):
 
     while scale_num < opt.stop_scale + 1:
         opt.curr_scale = scale_num
-        opt.nfc = min(opt.nfc_init * pow(2, math.floor(scale_num / 4)), 128)
-        opt.min_nfc = min(opt.min_nfc_init * pow(2, math.floor(scale_num / 4)), 128)
+        # opt.nfc = min(opt.nfc_init * pow(2, math.floor(scale_num / 4)), 128)
+        # opt.min_nfc = min(opt.min_nfc_init * pow(2, math.floor(scale_num / 4)), 128)
 
         opt.outf = '%s/%d' % (opt.out_, scale_num)
         try:
@@ -76,8 +76,8 @@ def train(opt):
         torch.save(Dts, '%s/Dts.pth' % (opt.out_))
 
         scale_num += 1
-        nfc_prev = opt.nfc
         del Dst_curr, Gst_curr, Dts_curr, Gts_curr
+
     opt.tb.close()
     return
 
@@ -109,7 +109,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 if steps > total_steps_per_scale:
                     keep_training = False
                     break
-                if opt.debug_run and steps > 20:
+                if opt.debug_run and steps > 10:
                     keep_training = False
                     break
 
@@ -349,6 +349,8 @@ def concat_pyramid(Gs, sources, opt):
     return G_z
 
 def init_models(opt):
+    opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale+1)/2)))))
+
     # generator initialization:
     if opt.use_unet_generator:
         use_four_level_unet = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H,W) / 16 > opt.ker_size
