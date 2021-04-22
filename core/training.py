@@ -50,6 +50,11 @@ def train(opt):
         else:
             Dst_curr, Gst_curr = init_models(opt)
             Dts_curr, Gts_curr = init_models(opt)
+            if (opt.curr_scale > 0 and opt.prev_base_channels == opt.base_channels):
+                Dst_curr.load_state_dict(torch.load('%s/%d/netDst.pth' % (opt.out_, opt.curr_scale - 1)))
+                Gst_curr.load_state_dict(torch.load('%s/%d/netGst.pth' % (opt.out_, opt.curr_scale - 1)))
+                Dts_curr.load_state_dict(torch.load('%s/%d/netDts.pth' % (opt.out_, opt.curr_scale - 1)))
+                Gts_curr.load_state_dict(torch.load('%s/%d/netGts.pth' % (opt.out_, opt.curr_scale - 1)))
 
         if len(opt.gpus) > 1:
             # Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
@@ -75,6 +80,7 @@ def train(opt):
         torch.save(Dst, '%s/Dst.pth' % (opt.out_))
         torch.save(Dts, '%s/Dts.pth' % (opt.out_))
 
+        opt.prev_base_channels = opt.base_channels
         scale_num += 1
         del Dst_curr, Gst_curr, Dts_curr, Gts_curr
 
@@ -373,6 +379,7 @@ def init_models(opt):
         netD = models.WDiscriminator(opt).to(opt.device)
     netD.apply(models.weights_init)
     print(netD)
+
     return netD, netG
 
 def load_trained_networks(opt):
