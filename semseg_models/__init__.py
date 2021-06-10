@@ -26,7 +26,7 @@ def CreateSemsegModel(args):
         betas=(0.9, 0.99))
         optimizer.zero_grad()
     if args.pretrained_semseg_path != '':
-        model.load_state_dict(torch.load(args.pretrained_semseg_path))
+        model=torch.load(args.pretrained_semseg_path)
     model.to(args.device)
     return model, optimizer
 

@@ -1,23 +1,22 @@
 import core.functions as functions
 import core.models as models
-import os
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
+from functools import partial
 from core.constants import MAX_CHANNELS_PER_LAYER
 import numpy as np
 import time
 from core.constants import H, W
 from core.functions import imresize_torch
-import datetime
 from torch.utils.tensorboard import SummaryWriter
-
+import signal, os, sys
 
 def train(opt):
     if opt.continue_train_from_path != '':
         Gst, Gts, Dst, Dts = load_trained_networks(opt)
         assert len(Gst) == len(Gts) == len(Dst) == len(Dts)
-        scale_num = len(Gst) - 1 if opt.train_last_scale_more else 0
+        scale_num = len(Gst) - 1
         resume_first_iteration = True
     else:
         scale_num = 0
@@ -25,87 +24,86 @@ def train(opt):
         Dst, Dts = [], []
         resume_first_iteration = False
 
-    opt.tb = SummaryWriter(os.path.join(opt.tb_logs_dir, '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])))
+    opt.tb = SummaryWriter(os.path.join(opt.tb_logs_dir, opt.folder_string))
+    graceful_exit = GracefulExit(opt.out_, opt.debug_run)
+    with graceful_exit:
+        while scale_num < opt.num_scales + 1:
+            opt.curr_scale = scale_num
+            opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale+1)/2)))))
+            opt.outf = '%s/%d' % (opt.out_, scale_num)
+            try:
+                os.makedirs(opt.outf)
+            except OSError:
+                pass
 
-    while scale_num < opt.stop_scale + 1:
-        opt.curr_scale = scale_num
-        # opt.nfc = min(opt.nfc_init * pow(2, math.floor(scale_num / 4)), 128)
-        # opt.min_nfc = min(opt.min_nfc_init * pow(2, math.floor(scale_num / 4)), 128)
+            if resume_first_iteration:
+                curr_nets = []
+                for net_list in [Dst, Gst, Dts, Gts]:
+                    curr_net = net_list[scale_num].train()
+                    curr_nets.append(functions.reset_grads(curr_net, True))
+                    net_list.remove(net_list[scale_num])
+                Dst_curr, Gst_curr = curr_nets[0], curr_nets[1]
+                Dts_curr, Gts_curr = curr_nets[2], curr_nets[3]
+            else:
+                Dst_curr, Gst_curr = init_models(opt)
+                Dts_curr, Gts_curr = init_models(opt)
 
-        opt.outf = '%s/%d' % (opt.out_, scale_num)
-        try:
-            os.makedirs(opt.outf)
-        except OSError:
-            pass
+            #add networks to GracefulExit:
+            graceful_exit.Gst.append(Gst_curr)
+            graceful_exit.Gts.append(Gts_curr)
+            graceful_exit.Dst.append(Dst_curr)
+            graceful_exit.Dts.append(Dts_curr)
 
-        if resume_first_iteration:
-            curr_nets = []
-            for net_list in [Dst, Gst, Dts, Gts]:
-                curr_net = net_list[scale_num].train()
-                curr_nets.append(functions.reset_grads(curr_net, True))
-                net_list.remove(net_list[scale_num])
-            Dst_curr, Gst_curr = curr_nets[0], curr_nets[1]
-            Dts_curr, Gts_curr = curr_nets[2], curr_nets[3]
+            if len(opt.gpus) > 1:
+                Dst_curr, Gst_curr = nn.DataParallel(Dst_curr), nn.DataParallel(Gst_curr)
+                Dts_curr, Gts_curr = nn.DataParallel(Dts_curr), nn.DataParallel(Gts_curr)
+
+
+            scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
+                                            opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch)
+            for net in scale_nets:
+                net = functions.reset_grads(net, False)
+                net.eval()
+            Dst_curr, Gst_curr, Dts_curr, Gts_curr = scale_nets
+
+            Gst.append(Gst_curr)
+            Gts.append(Gts_curr)
+            Dst.append(Dst_curr)
+            Dts.append(Dts_curr)
+
+            if not opt.debug_run:
+                torch.save(Gst, '%s/Gst.pth' % (opt.out_))
+                torch.save(Gts, '%s/Gts.pth' % (opt.out_))
+                torch.save(Dst, '%s/Dst.pth' % (opt.out_))
+                torch.save(Dts, '%s/Dts.pth' % (opt.out_))
+
+            opt.prev_base_channels = opt.base_channels
             resume_first_iteration = False
-        else:
-            Dst_curr, Gst_curr = init_models(opt)
-            Dts_curr, Gts_curr = init_models(opt)
-            if (opt.curr_scale > 0 and opt.prev_base_channels == opt.base_channels):
-                Dst_curr.load_state_dict(torch.load('%s/%d/netDst.pth' % (opt.out_, opt.curr_scale - 1)))
-                Gst_curr.load_state_dict(torch.load('%s/%d/netGst.pth' % (opt.out_, opt.curr_scale - 1)))
-                Dts_curr.load_state_dict(torch.load('%s/%d/netDts.pth' % (opt.out_, opt.curr_scale - 1)))
-                Gts_curr.load_state_dict(torch.load('%s/%d/netGts.pth' % (opt.out_, opt.curr_scale - 1)))
+            scale_num += 1
 
-        if len(opt.gpus) > 1:
-            # Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
-            # Dts_curr, Gts_curr = nn.DataParallel(Dts_curr, device_ids=opt.gpus), nn.DataParallel(Gts_curr, device_ids=opt.gpus) [i for i in range(len(opt.gpus))]
+        opt.tb.close()
+        return
 
-            Dst_curr, Gst_curr = nn.DataParallel(Dst_curr), nn.DataParallel(Gst_curr)
-            Dts_curr, Gts_curr = nn.DataParallel(Dts_curr), nn.DataParallel(Gts_curr)
-
-
-        scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts, opt)
-        for net in scale_nets:
-            net = functions.reset_grads(net, False)
-            net.eval()
-        Dst_curr, Gst_curr, Dts_curr, Gts_curr = scale_nets
-
-        Gst.append(Gst_curr)
-        Gts.append(Gts_curr)
-        Dst.append(Dst_curr)
-        Dts.append(Dts_curr)
-
-        torch.save(Gst, '%s/Gst.pth' % (opt.out_))
-        torch.save(Gts, '%s/Gts.pth' % (opt.out_))
-        torch.save(Dst, '%s/Dst.pth' % (opt.out_))
-        torch.save(Dts, '%s/Dts.pth' % (opt.out_))
-
-        opt.prev_base_channels = opt.base_channels
-        scale_num += 1
-        del Dst_curr, Gst_curr, Dts_curr, Gts_curr
-
-    opt.tb.close()
-    return
-
-def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list, opt):
+def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list, opt, resume=False, epoch_num_to_resume=1):
         # setup optimizers and schedulers:
         optimizerDst = optim.Adam(netDst.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
         optimizerGst = optim.Adam(netGst.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
         optimizerDts = optim.Adam(netDts.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
         optimizerGts = optim.Adam(netGts.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
 
-        discriminator_steps = 0
-        generator_steps = 0
-        steps = 0
-        checkpoint_int = 1
-        print_int = 0
-        save_pics_int = 0
-        epoch_num = 1
+
         batch_size = opt.source_loaders[opt.curr_scale].batch_size
         PICS_PER_EPOCH = 10
         opt.save_pics_rate = int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size / PICS_PER_EPOCH)
         total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size)
         start = time.time()
+        discriminator_steps = 0
+        generator_steps = 0
+        epoch_num = epoch_num_to_resume if resume else 1
+        steps = (epoch_num_to_resume-1)*int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size) if resume else 0
+        checkpoint_int = 1
+        print_int = 0
+        save_pics_int = 0
         keep_training = True
 
         while keep_training:
@@ -115,7 +113,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 if steps > total_steps_per_scale:
                     keep_training = False
                     break
-                if opt.debug_run and steps > 10:
+                if opt.debug_run and steps > opt.debug_stop_iteration:
                     keep_training = False
                     break
 
@@ -179,24 +177,27 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                         # (netGx, x, x_scales, prev_x,
                         #  netGy, y, y_scales, prev_y,
                         #  m_noise, opt)
-                        cyc_loss_x, cyc_loss_y, cyc_loss, cyc_images = cycle_consistency_loss(netGst, source_scales[opt.curr_scale], source_scales, prev_sit,
-                                                                                              netGts, target_scales[opt.curr_scale], target_scales, prev_tis,
-                                                                                              opt)
+                        cyc_loss_x, cyc_loss_y, cyc_loss, cyc_images = cycle_consistency_loss(source_scales[-1], prev_sit, netGst, Gst,
+                                                                                              target_scales[-1], prev_tis, netGts, Gts, opt)
+
+                            # cycle_consistency_loss(netGst, source_scales[opt.curr_scale], source_scales, prev_sit,
+                            #                                                                   netGts, target_scales[opt.curr_scale], target_scales, prev_tis,
+                            #                                                                   opt)
                         opt.tb.add_scalar('Scale%d/Cyclic/LossSTS' % opt.curr_scale, cyc_loss_x.item()/opt.lambda_cyclic, int(generator_steps/opt.cyclic_loss_calc_rate))
                         opt.tb.add_scalar('Scale%d/Cyclic/LossTST' % opt.curr_scale, cyc_loss_y.item()/opt.lambda_cyclic, int(generator_steps/opt.cyclic_loss_calc_rate))
                         opt.tb.add_scalar('Scale%d/Cyclic/Loss' % opt.curr_scale, cyc_loss.item()/opt.lambda_cyclic, int(generator_steps/opt.cyclic_loss_calc_rate))
 
-                    if opt.identity_loss_calc_rate > 0 and generator_steps % opt.identity_loss_calc_rate == 0:
-                        # Identity Loss:
-                        # (netGx, x, x_scales, prev_x,
-                        #  netGy, y, y_scales, prev_y,
-                        #  m_noise, opt)
-                        idt_loss_x, idt_loss_y, idt_loss, _ = identity_loss(netGst, source_scales[opt.curr_scale], source_scales, prev_sit,
-                                                                            netGts, target_scales[opt.curr_scale], target_scales, prev_tis,
-                                                                            opt)
-                        opt.tb.add_scalar('Scale%d/Identity/LossTT' % opt.curr_scale, idt_loss_x.item(), int(generator_steps/opt.identity_loss_calc_rate))
-                        opt.tb.add_scalar('Scale%d/Identity/LossSS' % opt.curr_scale, idt_loss_y.item(), int(generator_steps/opt.identity_loss_calc_rate))
-                        opt.tb.add_scalar('Scale%d/Identity/Loss' % opt.curr_scale, idt_loss.item(), int(generator_steps/opt.identity_loss_calc_rate))
+                    # if opt.identity_loss_calc_rate > 0 and generator_steps % opt.identity_loss_calc_rate == 0:
+                    #     # Identity Loss:
+                    #     # (netGx, x, x_scales, prev_x,
+                    #     #  netGy, y, y_scales, prev_y,
+                    #     #  m_noise, opt)
+                    #     idt_loss_x, idt_loss_y, idt_loss, _ = identity_loss(netGst, source_scales[opt.curr_scale], source_scales, prev_sit,
+                    #                                                         netGts, target_scales[opt.curr_scale], target_scales, prev_tis,
+                    #                                                         opt)
+                    #     opt.tb.add_scalar('Scale%d/Identity/LossTT' % opt.curr_scale, idt_loss_x.item(), int(generator_steps/opt.identity_loss_calc_rate))
+                    #     opt.tb.add_scalar('Scale%d/Identity/LossSS' % opt.curr_scale, idt_loss_y.item(), int(generator_steps/opt.identity_loss_calc_rate))
+                    #     opt.tb.add_scalar('Scale%d/Identity/Loss' % opt.curr_scale, idt_loss.item(), int(generator_steps/opt.identity_loss_calc_rate))
 
                     generator_steps += 1
 
@@ -214,9 +215,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     s     = norm_image(source_scales[opt.curr_scale][0])
                     t     = norm_image(target_scales[opt.curr_scale][0])
                     if cyc_images is None:
-                        _, _, _, cyc_images = cycle_consistency_loss(netGst, source_scales[opt.curr_scale], source_scales, prev_sit,
-                                                                     netGts, target_scales[opt.curr_scale], target_scales, prev_tis,
-                                                                     opt)
+                        _, _, _, cyc_images = cycle_consistency_loss(source_scales[-1], prev_sit, netGst, Gst,
+                                                                     target_scales[-1], prev_tis, netGts, Gts, opt)
                     sit   = norm_image(cyc_images[0][0])
                     sitis = norm_image(cyc_images[1][0])
                     tis   = norm_image(cyc_images[2][0])
@@ -230,8 +230,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                     save_pics_int += 1
 
-                # Save network checkpoint every 20k steps:
-                if steps > checkpoint_int * 20000:
+                # Save network checkpoint every 5k steps:
+                if steps > checkpoint_int * 5000:
                     print('scale %d: saving networks after %d steps...' % (opt.curr_scale, steps))
                     if (len(opt.gpus) > 1):
                         functions.save_networks(netDst.module, netGst.module, netDts.module, netGts.module, opt)
@@ -241,10 +241,10 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 steps = np.minimum(generator_steps, discriminator_steps)
 
         if (len(opt.gpus) > 1):
-            functions.save_networks(netDst.module, netGst.module, netDts.module, netGts.module, opt)
+            functions.save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt)
             return netDst.module, netGst.module, netDts.module, netGts.module
         else:
-            functions.save_networks(netDst, netGst, netDts, netGts, opt)
+            functions.save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt)
             return netDst, netGst, netDts, netGts
 
 def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales, opt):
@@ -282,62 +282,57 @@ def adversarial_generative_train(netG, netD, prev, from_scales, opt):
     output = netD(fake)
     errG = -1 * opt.lambda_adversarial * output.mean()
     errG.backward()
-
-    # reconstruction loss (as appers in singan, doesn't work for my settings):
-    # loss = nn.MSELoss()
-    # prev_rec = concat_pyramid(Gs, source_scales, target_scales, source_scale, m_noise, m_image, opt)
-    # rec_loss = loss(prev_rec.detach(), curr_scale)
-    # rec_loss.backward(retain_graph=True)
-    # rec_loss = rec_loss.detach()
-
     return errG
 
-def cycle_consistency_loss(netGx, x, x_scales, prev_x, netGy, y, y_scales, prev_y, opt):
-    criterion_xx = nn.L1Loss()
-    criterion_yy = nn.L1Loss()
+# def cycle_consistency_loss(currGst, source_batch, source_scales, prev_sit, currGts, target_batch, target_scales, prev_tis, opt):
+def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
+                           target_batch, prev_tis, currGts, Gts_pyramid, opt):
+    criterion_sts = nn.L1Loss()
+    criterion_tst = nn.L1Loss()
 
-    #Gy(x):
-    curr_x = x_scales[opt.curr_scale]
-    Gy_x = netGx(curr_x, prev_x)
+    #source in target:
+    sit_image = currGst(source_batch, prev_sit)
+    with torch.no_grad():
+        generated_pyramid_sit = functions.GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
+        prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt)
+    #source in target in source:
+    sitis_image = currGts(sit_image, prev_sit_generated)
+    loss_sts = opt.lambda_cyclic * criterion_sts(sitis_image, source_batch)
+    loss_sts.backward()
 
-    #Gx(Gy(x)):
-    curr_yx = Gy_x
-    Gx_Gy_x = netGy(curr_yx, prev_y)
-    loss_x = opt.lambda_cyclic * criterion_xx(Gx_Gy_x, x)
-    loss_x.backward()
 
-    # Gx(y):
-    curr_y = y_scales[opt.curr_scale]
-    Gx_y = netGy(curr_y, prev_y)
+    #source in target:
+    tis_image = currGts(target_batch, prev_tis)
+    with torch.no_grad():
+        generated_pyramid_tis = functions.GeneratePyramid(tis_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
+        prev_tis_generated = concat_pyramid(Gst_pyramid, generated_pyramid_tis, opt)
+    #source in target in source:
+    tisit_image = currGst(tis_image, prev_tis_generated)
+    loss_tst = opt.lambda_cyclic * criterion_tst(tisit_image, target_batch)
+    loss_tst.backward()
 
-    # Gy(Gx(y)):
-    curr_xy = Gx_y
-    Gy_Gx_y = netGx(curr_xy, prev_x)
-    loss_y = opt.lambda_cyclic * criterion_yy(Gy_Gx_y, y)
-    loss_y.backward()
+    loss = loss_sts + loss_tst
 
-    loss = loss_x + loss_y
+    return loss_sts, loss_tst, loss, (sit_image, sitis_image, tis_image, tisit_image)
 
-    return loss_x, loss_y, loss, (Gy_x, Gx_Gy_x, Gx_y, Gy_Gx_y)
-
-def identity_loss(netGx, x, x_scales, prev_x, netGy, y, y_scales, prev_y, opt):
-    criterion_x = nn.L1Loss()
-    criterion_y = nn.L1Loss()
-
-    #Gy(y):
-    curr_y = y_scales[opt.curr_scale]
-    Gy_y = netGx(curr_y, prev_y)
-    loss_y = criterion_y(Gy_y, y)
-    loss_y.backward()
-
-    #Gx(x):
-    curr_x = x_scales[opt.curr_scale]
-    Gx_x = netGy(curr_x, prev_x)
-    loss_x = criterion_x(Gx_x, x)
-    loss_x.backward()
-
-    loss = loss_x + loss_y
-    return loss_x, loss_y, loss, (Gx_x, Gy_y)
+# def identity_loss(netGx, x, x_scales, prev_x, netGy, y, y_scales, prev_y, opt):
+#     criterion_x = nn.L1Loss()
+#     criterion_y = nn.L1Loss()
+#
+#     #Gy(y):
+#     curr_y = y_scales[opt.curr_scale]
+#     Gy_y = netGx(curr_y, prev_y)
+#     loss_y = criterion_y(Gy_y, y)
+#     loss_y.backward()
+#
+#     #Gx(x):
+#     curr_x = x_scales[opt.curr_scale]
+#     Gx_x = netGy(curr_x, prev_x)
+#     loss_x = criterion_x(Gx_x, x)
+#     loss_x.backward()
+#
+#     loss = loss_x + loss_y
+#     return loss_x, loss_y, loss, (Gx_x, Gy_y)
 
 def concat_pyramid(Gs, sources, opt):
     if len(Gs) == 0:
@@ -355,8 +350,6 @@ def concat_pyramid(Gs, sources, opt):
     return G_z
 
 def init_models(opt):
-    opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale+1)/2)))))
-
     # generator initialization:
     if opt.use_unet_generator:
         use_four_level_unet = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H,W) / 16 > opt.ker_size
@@ -398,4 +391,37 @@ def norm_image(im):
     out = (im + 1)/2
     assert torch.max(out) <= 1 and torch.min(out) >= 0
     return out
+
+def handler(nets_dict, signum, frame):
+    if not nets_dict['debug']:
+        torch.save(nets_dict['Gst'], '%s/Gst.pth' % (nets_dict['out_path']))
+        torch.save(nets_dict['Gts'], '%s/Gts.pth' % (nets_dict['out_path']))
+        torch.save(nets_dict['Dst'], '%s/Dst.pth' % (nets_dict['out_path']))
+        torch.save(nets_dict['Dts'], '%s/Dts.pth' % (nets_dict['out_path']))
+        print('\nExited unexpectedly. Pyramids has been saved successfully.')
+        print('Length of pyramid list:', len(nets_dict['Gst']))
+        print('Exiting. Bye!')
+    sys.exit(0)
+
+class GracefulExit:
+    def __init__(self, path_to_save_networks, is_debug):
+        self.path_to_save_networks = path_to_save_networks
+        self.Gst = []
+        self.Gts = []
+        self.Dst = []
+        self.Dts = []
+        self.net_dict = {'Gts' : self.Gts,
+                         'Gst' : self.Gst,
+                         'Dts' : self.Dts,
+                         'Dst' : self.Dst,
+                         'out_path' : path_to_save_networks,
+                         'debug' : is_debug}
+
+    def __enter__(self):
+        signal.signal(signal.SIGTERM,  partial(handler, self.net_dict))
+        signal.signal(signal.SIGINT,   partial(handler, self.net_dict))
+
+    def __exit__(self, type, value, traceback):
+        pass
+
 

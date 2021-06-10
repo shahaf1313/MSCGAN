@@ -4,8 +4,8 @@ import os.path as osp
 from PIL import Image
 
 class cityscapesDataSet(domainAdaptationDataSet):
-    def __init__(self, root, list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_scales_pyramid=False):
-        super(cityscapesDataSet, self).__init__( root, list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
+    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_scales_pyramid=False):
+        super(cityscapesDataSet, self).__init__(root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
         self.get_scales_pyramid= get_scales_pyramid
     def __getitem__(self, index):
         name = self.img_ids[index]

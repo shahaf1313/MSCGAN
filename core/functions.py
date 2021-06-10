@@ -90,17 +90,12 @@ def read_image2np(opt):
     return x
 
 
-def save_networks(netDst, netGst, netDts, netGts, opt):
-    torch.save(netDst.state_dict(), '%s/netDst.pth' % (opt.outf))
-    torch.save(netGst.state_dict(), '%s/netGst.pth' % (opt.outf))
-    torch.save(netDts.state_dict(), '%s/netDts.pth' % (opt.outf))
-    torch.save(netGts.state_dict(), '%s/netGts.pth' % (opt.outf))
-
-
-def adjust_scales2image(H, W, opt):
-    opt.max_size = max(H, W)
-    opt.min_size = math.ceil(min(H, W) * math.pow(opt.scale_factor, opt.num_scales))
-    opt.stop_scale = opt.num_scales
+def save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt):
+    if not opt.debug_run:
+        torch.save(Dst + [netDst], '%s/Dst.pth' % (opt.outf))
+        torch.save(Gst + [netGst], '%s/Gst.pth' % (opt.outf))
+        torch.save(Dts + [netDts], '%s/Dts.pth' % (opt.outf))
+        torch.save(Gts + [netGts], '%s/Gts.pth' % (opt.outf))
 
 def colorize_mask(mask):
     # mask: tensor of the mask
@@ -146,3 +141,27 @@ def compute_iou_torch(confusion_matrix):
     iou = intersection / union.type(torch.float32)
     miou = nanmean_torch(iou)
     return iou, miou
+
+def GeneratePyramid(image, num_scales, curr_scale, scale_factor, crop_size):
+    scales_pyramid = []
+    if isinstance(image, Image.Image):
+        for i in range(0, curr_scale + 1, 1):
+            scale = math.pow(scale_factor, num_scales - i)
+            curr_size = (np.ceil(scale * np.array(crop_size))).astype(np.int)
+            curr_scale_image = image.resize(curr_size, Image.BICUBIC)
+            curr_scale_image = RGBImageToNumpy(curr_scale_image)
+            scales_pyramid.append(curr_scale_image)
+    elif isinstance(image, torch.Tensor):
+        for i in range(0, curr_scale + 1, 1):
+            scale = math.pow(scale_factor, curr_scale - i)
+            curr_scale_image = imresize_torch(image, scale)
+            scales_pyramid.append(curr_scale_image)
+    return scales_pyramid
+
+
+
+def RGBImageToNumpy(im):
+    im = np.asarray(im, np.float32)
+    im = np.transpose(im, (2, 0, 1))
+    im = (im - 128.) / 128  # change from 0..255 to -1..1
+    return im

@@ -5,8 +5,8 @@ import numpy as np
 from core.constants import IMG_RESIZE
 
 class GTA5DataSet(domainAdaptationDataSet):
-    def __init__(self, root, list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False):
-        super(GTA5DataSet, self).__init__(root, list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
+    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False):
+        super(GTA5DataSet, self).__init__(root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
         self.resize = IMG_RESIZE
     def __len__(self):
         return len(self.img_ids)
@@ -40,7 +40,7 @@ class GTA5DataSet(domainAdaptationDataSet):
         else:
             return scales_pyramid
 
-    def SetEpochSize(self, epoch_size):
-        if (epoch_size > len(self.img_ids)):
-            self.img_ids = self.img_ids * int(np.ceil(float(epoch_size) / len(self.img_ids)))
-        self.img_ids = self.img_ids[:epoch_size]
+    # def SetEpochSize(self, epoch_size):
+    #     if (epoch_size > len(self.img_ids)):
+    #         self.img_ids = self.img_ids * int(np.ceil(float(epoch_size) / len(self.img_ids)))
+    #     self.img_ids = self.img_ids[:epoch_size]

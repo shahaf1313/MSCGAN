@@ -15,14 +15,14 @@ def get_arguments():
     # load, input, save configurations:
     parser.add_argument('--manualSeed', default=1337, type=int, help='manual seed')
     parser.add_argument('--continue_train_from_path', type=str, help='Path to folder that contains all networks and continues to train from there', default='')
-    parser.add_argument('--train_last_scale_more', default=False, action='store_true', help='Continues to train last generator and critic.')
-    parser.add_argument('--nc_z', type=int, help='noise # channels', default=3)
+    parser.add_argument('--resume_to_epoch', default=1, type=int, help='Resumes training from specified epoch')
     parser.add_argument('--nc_im', type=int, help='image # channels', default=3)
     parser.add_argument('--out', help='output folder', default='Output')
 
     # Dataset parameters:
     parser.add_argument("--source", type=str, default='gta5', help="source dataset : gta5 or synthia")
     parser.add_argument("--target", type=str, default='cityscapes', help="target dataset : cityscapes")
+    parser.add_argument("--im2im_data_dir", type=str, default='/home/shahaf/data/horse2zebra', help="im2im dir of current dataset")
     parser.add_argument("--src_data_dir", type=str, default='/home/shahaf/data/GTA5', help="Path to the directory containing the source dataset.")
     parser.add_argument("--src_data_list", type=str, default='./dataset/gta5_list/', help="Path to folder that contains a file with a list of images from the source dataset. File named set.txt, where set is train/val/test.")
     parser.add_argument("--trg_data_dir", type=str, default='/home/shahaf/data/cityscapes', help="Path to the directory containing the target dataset.")
@@ -77,9 +77,10 @@ def get_arguments():
 
 
     # Miscellaneous parameters:
-    parser.add_argument('--mode', help='task to be done', default='train')
+    parser.add_argument('--train_im2im_pyramid', help='Chooses whether to train semseg pyramid or im2im pyramid (defualt is to train semseg).', default=False, action='store_true')
     parser.add_argument("--tb_logs_dir", type=str, required=False, default='./runs', help="Path to Tensorboard logs dir.")
     parser.add_argument('--debug_run', default=False, action='store_true')
+    parser.add_argument('--debug_stop_iteration', type=int, default=15, help='Iteration number to finish training current scale.')
     parser.add_argument("--checkpoints_dir", type=str, required=False, default='./TrainedModels', help="Where to save snapshots of the model.")
     parser.add_argument("--print_rate", type=int, required=False, default=100, help="Print progress to screen every x iterations")
     parser.add_argument("--save_pics_rate", type=int, required=False, default=1000, help="Save images to tb every x iterations")
@@ -104,22 +105,27 @@ class Logger(object):
 
 def post_config(opt):
         # init fixed parameters
-        if opt.debug_run:
-            opt.tb_logs_dir = './debug_runs'
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(opt.gpus)[1:-1].strip(' ').replace(" ", "")
-        opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
-        opt.out_ = 'TrainedModels/%s' % datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S')
+        opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])
+        opt.out_ = 'TrainedModels/%s' % opt.folder_string
         try:
             os.makedirs(opt.out_)
         except OSError:
             pass
+
+        if opt.debug_run:
+            try:
+                os.makedirs('./debug_runs/TrainedModels/%s' % opt.folder_string)
+            except OSError:
+                pass
+            opt.tb_logs_dir = './debug_runs'
+            opt.out_ = './debug_runs/TrainedModels/%s' % opt.folder_string
+
+        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(opt.gpus)[1:-1].strip(' ').replace(" ", "")
+        opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
+
         opt.logger = Logger(os.path.join(opt.out_, 'log.txt'))
         sys.stdout = opt.logger
-        opt.nfc_init = opt.nfc
-        opt.min_nfc = opt.nfc
-        opt.min_nfc_init = opt.min_nfc
-        opt.scale_factor_init = opt.scale_factor
 
         if opt.manualSeed is None:
             opt.manualSeed = random.randint(1, 10000)
