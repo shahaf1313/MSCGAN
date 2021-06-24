@@ -34,6 +34,7 @@ def get_arguments():
     parser.add_argument('--batch_size_list', type=int, nargs='+', help="batch size in each one of the scales", default=[0])
     parser.add_argument('--norm_type', type=str, default='batch_norm')
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
+    parser.add_argument('--use_conditinal_generator', default=False, action='store_true', help='Uses label conditioned generator')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
     parser.add_argument('--nfc', type=int, default=8)
     parser.add_argument('--ker_size', type=int, help='kernel size', default=3)
@@ -83,7 +84,7 @@ def get_arguments():
     parser.add_argument('--debug_stop_iteration', type=int, default=15, help='Iteration number to finish training current scale.')
     parser.add_argument("--checkpoints_dir", type=str, required=False, default='./TrainedModels', help="Where to save snapshots of the model.")
     parser.add_argument("--print_rate", type=int, required=False, default=100, help="Print progress to screen every x iterations")
-    parser.add_argument("--save_pics_rate", type=int, required=False, default=1000, help="Save images to tb every x iterations")
+    parser.add_argument("--pics_per_epoch", type=int, required=False, default=10, help="Defines the number of pictures to save each epoch.")
 
     return parser
 
@@ -113,6 +114,7 @@ def post_config(opt):
             pass
 
         if opt.debug_run:
+            opt.print_rate = 5
             try:
                 os.makedirs('./debug_runs/TrainedModels/%s' % opt.folder_string)
             except OSError:

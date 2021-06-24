@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import numpy as np
 
 
 class ConvBlock(nn.Sequential):
@@ -13,47 +12,33 @@ class ConvBlock(nn.Sequential):
             self.add_module('norm',nn.InstanceNorm2d(out_channel,affine=True))
         self.add_module('LeakyRelu',nn.LeakyReLU(0.2, inplace=True))
 
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv2d') != -1:
-        m.weight.data.normal_(0.0, 0.02)
-    elif classname.find('Norm') != -1:
-        m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
-   
-class WDiscriminator(nn.Module):
-    def __init__(self, opt):
-        super(WDiscriminator, self).__init__()
-        self.is_cuda = torch.cuda.is_available()
-        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body = nn.Sequential()
-        for i in range(opt.num_layer-2):
-            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-            self.body.add_module('block%d'%(i+1),block)
-        self.tail = nn.Sequential(nn.Conv2d(opt.base_channels,1,kernel_size=opt.ker_size,stride=1,padding=1),
-                                  nn.LeakyReLU(0.2))
+class ConvBlockSpade(nn.Module):
+    def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, activation='lrelu'):
+        super(ConvBlockSpade, self).__init__()
+        self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
+        self.spade = SPADE(norm_type, ker_size, out_channel, label_nc=3)
+        if activation=='lrelu':
+            self.actvn = nn.LeakyReLU(0.2)
+        elif activation=='tanh':
+            self.actvn = nn.Tanh()
 
-    def forward(self,x):
-        x = self.head(x)
-        x = self.body(x)
-        x = self.tail(x)
-        # #todo: I Added! see if neccessairy!
-        # x = torch.tanh(x)
-        return x
-
+    def forward(self, x, seg_map):
+        z = self.conv(self.actvn(self.spade(x, seg_map)))
+        return z
 
 class ConvGenerator(nn.Module):
     def __init__(self, opt):
         super(ConvGenerator, self).__init__()
         self.is_initial_scale = opt.curr_scale == 0
         alpha = 1 if self.is_initial_scale else 0
-        self.head = ConvBlock((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type) #GenConvTransBlock(opt.nc_z,N,opt.ker_size,opt.padd_size,opt.stride)
+        self.head = ConvBlock((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
         self.body = nn.Sequential()
         for i in range(opt.num_layer-2):
             block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
             self.body.add_module('block%d'%(i+1),block)
         self.tail = nn.Sequential(
             nn.Conv2d(opt.base_channels, opt.nc_im, kernel_size=opt.ker_size, stride=1, padding=1),
+            nn.BatchNorm2d(opt.nc_im), #todo: I added, see what is happening
             nn.Tanh()
         )
     def forward(self, curr_scale, prev_scale):
@@ -68,6 +53,58 @@ class ConvGenerator(nn.Module):
         # z = z[:,:,ind:(prev_scale.shape[2]-ind),ind:(curr_scale.shape[3]-ind)]
         return z
 
+class LabelConditionedGenerator(nn.Module):
+    def __init__(self, opt):
+        super(LabelConditionedGenerator, self).__init__()
+        self.is_initial_scale = opt.curr_scale == 0
+        alpha = 1 if self.is_initial_scale else 0
+        self.head = ConvBlockSpade((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body = nn.Sequential()
+        for i in range(opt.num_layer-2):
+            block = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
+            self.body.add_module('block%d'%(i+1),block)
+        self.tail = ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type, activation='tanh')
+
+    def forward(self, curr_scale, prev_scale, seg_map):
+        if self.is_initial_scale:
+            z = curr_scale
+        else:
+            z = torch.cat((curr_scale, prev_scale), 1)
+        z = self.head(z, seg_map)
+        z = self.body(z, seg_map)
+        z = self.tail(z, seg_map)
+        # ind = int((prev_scale.shape[2]-curr_scale.shape[2])/2)
+        # z = z[:,:,ind:(prev_scale.shape[2]-ind),ind:(curr_scale.shape[3]-ind)]
+        return z
+   
+class WDiscriminator(nn.Module):
+    def __init__(self, opt):
+        super(WDiscriminator, self).__init__()
+        self.is_cuda = torch.cuda.is_available()
+        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body = nn.Sequential()
+        for i in range(opt.num_layer-2):
+            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+            self.body.add_module('block%d'%(i+1),block)
+        self.tail = nn.Sequential(nn.Conv2d(opt.base_channels,1,kernel_size=opt.ker_size,stride=1,padding=1),
+                                  nn.BatchNorm2d(1), #todo: I added, see what is happening
+                                  nn.LeakyReLU(0.2))
+
+    def forward(self,x):
+        x = self.head(x)
+        x = self.body(x)
+        x = self.tail(x)
+        # #todo: I Added! see if neccessairy!
+        # x = torch.tanh(x)
+        return x
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv2d') != -1:
+        m.weight.data.normal_(0.0, 0.02)
+    elif classname.find('Norm') != -1:
+        m.weight.data.normal_(1.0, 0.02)
+        m.bias.data.fill_(0)
 
 class UNetGeneratorFourLayers(nn.Module):
 
@@ -275,39 +312,40 @@ class LocalNet(nn.Module):
         self.refpad = nn.ReflectionPad2d(1)
 
 class WDiscriminatorDownscale(nn.Module):
-    def __init__(self, opt):
+    def __init__(self, opt, four_level_discriminator):
         super(WDiscriminatorDownscale, self).__init__()
-
+        self.four_level = four_level_discriminator
         self.l0 = nn.Sequential(
             nn.Conv2d(opt.nc_im, opt.base_channels, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(opt.base_channels),
             nn.LeakyReLU()
         )
         self.l1 = nn.Sequential(
-            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(opt.base_channels),
+            nn.Conv2d(opt.base_channels, 2*opt.base_channels, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(2*opt.base_channels),
             nn.LeakyReLU()
         )
         self.l2 = nn.Sequential(
-            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(opt.base_channels),
+            nn.Conv2d(2*opt.base_channels, 2*opt.base_channels, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(2*opt.base_channels),
             nn.LeakyReLU()
         )
-        self.l3 = nn.Sequential(
-            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(opt.base_channels),
-            nn.LeakyReLU()
-        )
-        self.l4 = nn.Sequential(
-            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(opt.base_channels),
-            nn.LeakyReLU()
-        )
-        self.l5 = nn.Sequential(
-            nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
-            nn.BatchNorm2d(opt.base_channels),
-            nn.LeakyReLU()
-        )
+        if self.four_level:
+            self.l3 = nn.Sequential(
+                nn.Conv2d(2*opt.base_channels, 4*opt.base_channels, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(4*opt.base_channels),
+                nn.LeakyReLU()
+            )
+            self.l4 = nn.Sequential(
+                nn.Conv2d(4*opt.base_channels, 4*opt.base_channels, kernel_size=4, stride=2, padding=1),
+                nn.BatchNorm2d(4*opt.base_channels),
+                nn.LeakyReLU()
+            )
+        # self.l5 = nn.Sequential(
+        #     nn.Conv2d(opt.base_channels, opt.base_channels, kernel_size=4, stride=2, padding=1),
+        #     nn.BatchNorm2d(opt.base_channels),
+        #     nn.LeakyReLU()
+        # )
 
 
 
@@ -315,7 +353,63 @@ class WDiscriminatorDownscale(nn.Module):
         x0 = self.l0(x)
         x1 = self.l1(x0)
         x2 = self.l2(x1)
-        x3 = self.l3(x2)
-        x4 = self.l4(x3)
-        # x5 = self.l5(x4)
-        return x4
+        if self.four_level:
+            x3 = self.l3(x2)
+            x4 = self.l4(x3)
+            # x5 = self.l5(x4)
+            return x4
+        return  x2
+# # Creates SPADE normalization layer based on the given configuration
+# SPADE consists of two steps. First, it normalizes the activations using
+# your favorite normalization method, such as Batch Norm or Instance Norm.
+# Second, it applies scale and bias to the normalized output, conditioned on
+# the segmentation map.
+# The format of |config_text| is spade(norm)(ks), where
+# (norm) specifies the type of parameter-free normalization.
+#       (e.g. syncbatch, batch, instance)
+# (ks) specifies the size of kernel in the SPADE module (e.g. 3x3)
+# Example |config_text| will be spadesyncbatch3x3, or spadeinstance5x5.
+# Also, the other arguments are
+# |norm_nc|: the #channels of the normalized activations, hence the output dim of SPADE
+# |label_nc|: the #channels of the input semantic map, hence the input dim of SPADE
+class SPADE(nn.Module):
+    def __init__(self, param_free_norm_type, kernel_size, norm_nc, label_nc):
+        super().__init__()
+
+        if param_free_norm_type == 'instance_norm':
+            self.param_free_norm = nn.InstanceNorm2d(norm_nc, affine=False)
+        # todo: add syncbatch after I will implement DDP:
+        # elif param_free_norm_type == 'syncbatch':
+        #     self.param_free_norm = SynchronizedBatchNorm2d(norm_nc, affine=False)
+        elif param_free_norm_type == 'batch_norm':
+            self.param_free_norm = nn.BatchNorm2d(norm_nc, affine=False)
+        else:
+            raise ValueError('%s is not a recognized param-free norm type in SPADE'
+                             % param_free_norm_type)
+
+        # The dimension of the intermediate embedding space. Yes, hardcoded.
+        nhidden = 128
+
+        pw = kernel_size // 2
+        self.mlp_shared = nn.Sequential(
+            nn.Conv2d(label_nc, nhidden, kernel_size=kernel_size, padding=pw),
+            nn.ReLU()
+        )
+        self.mlp_gamma = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
+        self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
+
+    def forward(self, x, segmap):
+
+        # Part 1. generate parameter-free normalized activations
+        normalized = self.param_free_norm(x)
+
+        # Part 2. produce scaling and bias conditioned on semantic map
+        segmap = nn.functional.interpolate(segmap, size=x.size()[2:], mode='nearest')
+        actv = self.mlp_shared(segmap)
+        gamma = self.mlp_gamma(actv)
+        beta = self.mlp_beta(actv)
+
+        # apply scale and bias
+        out = normalized * (1 + gamma) + beta
+
+        return out

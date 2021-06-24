@@ -11,13 +11,46 @@ from core.constants import H, W
 from core.functions import imresize_torch
 from torch.utils.tensorboard import SummaryWriter
 import signal, os, sys
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
+def setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+
+def cleanup():
+    dist.destroy_process_group()
+
+
+def demo_basic(model, rank, world_size):
+    print(f"Running basic DDP example on rank {rank}.")
+    setup(rank, world_size)
+
+    # create model and move it to GPU with id rank
+    model = model.to(rank)
+    ddp_model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+    cleanup()
+
+
+def run_demo(demo_fn, world_size):
+    mp.spawn(demo_fn,
+             args=(world_size,),
+             nprocs=world_size,
+             join=True)
+
+# (Shahaf) It might be that to use DDP correctly all you need to do is to run the following line:
+# run_demo(demo_basic, num_of_gpus)
 
 def train(opt):
     if opt.continue_train_from_path != '':
         Gst, Gts, Dst, Dts = load_trained_networks(opt)
         assert len(Gst) == len(Gts) == len(Dst) == len(Dts)
-        scale_num = len(Gst) - 1
-        resume_first_iteration = True
+        scale_num = len(Gst) - 1 if opt.resume_to_epoch > 0 else len(Gst)
+        resume_first_iteration = True if opt.resume_to_epoch > 0 else False
+        opt.resume_to_epoch = opt.resume_to_epoch if opt.resume_to_epoch > 0 else 1
     else:
         scale_num = 0
         Gst, Gts = [], []
@@ -54,7 +87,10 @@ def train(opt):
             graceful_exit.Dst.append(Dst_curr)
             graceful_exit.Dts.append(Dts_curr)
 
-            if len(opt.gpus) > 1:
+            # todo: implement DistributedDataParallel using the tutorial form pytorch's website!
+            if len(opt.gpus) > 1: #Use data parallel and SyncBatchnorm
+                # Dst_curr, Gst_curr = nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Dst_curr)), nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Gst_curr))
+                # Dts_curr, Gts_curr = nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Dts_curr)), nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Gts_curr))
                 Dst_curr, Gst_curr = nn.DataParallel(Dst_curr), nn.DataParallel(Gst_curr)
                 Dts_curr, Gts_curr = nn.DataParallel(Dts_curr), nn.DataParallel(Gts_curr)
 
@@ -93,8 +129,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
 
         batch_size = opt.source_loaders[opt.curr_scale].batch_size
-        PICS_PER_EPOCH = 10
-        opt.save_pics_rate = int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size / PICS_PER_EPOCH)
+        opt.save_pics_rate = int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size / opt.pics_per_epoch)
         total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size)
         start = time.time()
         discriminator_steps = 0
@@ -102,7 +137,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         epoch_num = epoch_num_to_resume if resume else 1
         steps = (epoch_num_to_resume-1)*int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size) if resume else 0
         checkpoint_int = 1
-        print_int = 0
+        print_int = 0 if not resume else int(steps/opt.print_rate)
         save_pics_int = 0
         keep_training = True
 
@@ -230,13 +265,13 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                     save_pics_int += 1
 
-                # Save network checkpoint every 5k steps:
-                if steps > checkpoint_int * 5000:
+                # Save network checkpoint every 2k steps:
+                if steps > checkpoint_int * 2000:
                     print('scale %d: saving networks after %d steps...' % (opt.curr_scale, steps))
                     if (len(opt.gpus) > 1):
-                        functions.save_networks(netDst.module, netGst.module, netDts.module, netGts.module, opt)
+                        functions.save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt)
                     else:
-                        functions.save_networks(netDst, netGst, netDts, netGts, opt)
+                        functions.save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt)
                     checkpoint_int += 1
                 steps = np.minimum(generator_steps, discriminator_steps)
 
@@ -247,9 +282,10 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             functions.save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt)
             return netDst, netGst, netDts, netGts
 
-def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales, opt):
+def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales, opt, real_segmaps=None):
     # train with real image
-    output = netD(real_images).to(opt.device)
+    # output = netD(real_images).to(opt.device)
+    output = netD(real_images)
     errD_real = -1 * opt.lambda_adversarial * output.mean()
     errD_real.backward(retain_graph=True)
     D_x = errD_real.item()
@@ -257,7 +293,7 @@ def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales
     # train with fake
     curr = from_scales[opt.curr_scale]
     with torch.no_grad():
-        fake_images = netG(curr, prev)
+        fake_images = netG(curr, prev, real_segmaps) if opt.use_conditinal_generator else netG(curr, prev)
     output = netD(fake_images.detach())
     errD_fake =  opt.lambda_adversarial * output.mean()
     errD_fake.backward(retain_graph=True)
@@ -271,12 +307,12 @@ def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales
     return D_x, D_G_z, errD
 
 
-def adversarial_generative_train(netG, netD, prev, from_scales, opt):
+def adversarial_generative_train(netG, netD, prev, from_scales, opt, seg_maps=None):
 
     ##todo: I added!
     # train with fake
     curr = from_scales[opt.curr_scale]
-    fake = netG(curr, prev)
+    fake = netG(curr, prev, seg_maps) if opt.use_conditinal_generator else netG(curr, prev)
     ##end
 
     output = netD(fake)
@@ -286,17 +322,21 @@ def adversarial_generative_train(netG, netD, prev, from_scales, opt):
 
 # def cycle_consistency_loss(currGst, source_batch, source_scales, prev_sit, currGts, target_batch, target_scales, prev_tis, opt):
 def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
-                           target_batch, prev_tis, currGts, Gts_pyramid, opt):
+                           target_batch, prev_tis, currGts, Gts_pyramid, opt,
+                           segmap_source=None, segmap_target=None, net_seg_target=None, net_seg_source=None):
     criterion_sts = nn.L1Loss()
     criterion_tst = nn.L1Loss()
 
     #source in target:
-    sit_image = currGst(source_batch, prev_sit)
+    sit_image = currGst(source_batch, prev_sit, segmap_source) if opt.use_conditinal_generator else currGst(source_batch, prev_sit)
+    # todo: make sure that segmentation network is passed correctly:
+    # created_segmap_target = net_seg_target(sit_image)
+    created_segmap_target = None
     with torch.no_grad():
         generated_pyramid_sit = functions.GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
         prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt)
     #source in target in source:
-    sitis_image = currGts(sit_image, prev_sit_generated)
+    sitis_image = currGts(sit_image, prev_sit_generated, created_segmap_target) if opt.use_conditinal_generator else currGts(sit_image, prev_sit_generated)
     loss_sts = opt.lambda_cyclic * criterion_sts(sitis_image, source_batch)
     loss_sts.backward()
 
@@ -350,15 +390,18 @@ def concat_pyramid(Gs, sources, opt):
     return G_z
 
 def init_models(opt):
+    use_four_level_net = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H,W) / 16 > opt.ker_size
     # generator initialization:
     if opt.use_unet_generator:
-        use_four_level_unet = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H,W) / 16 > opt.ker_size
-        if use_four_level_unet:
+        # use_four_level_unet = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H,W) / 16 > opt.ker_size
+        if use_four_level_net:
             print('Generating 4 layers UNET model')
             netG = models.UNetGeneratorFourLayers(opt).to(opt.device)
         else:
             print('Generating 2 layers UNET model')
             netG = models.UNetGeneratorTwoLayers(opt).to(opt.device)
+    elif opt.use_conditinal_generator:
+        netG = models.LabelConditionedGenerator(opt).to(opt.device)
     else:
         netG = models.ConvGenerator(opt).to(opt.device)
     netG.apply(models.weights_init)
@@ -367,7 +410,7 @@ def init_models(opt):
 
     # discriminator initialization:
     if opt.use_downscale_discriminator:
-        netD = models.WDiscriminatorDownscale(opt).to(opt.device)
+        netD = models.WDiscriminatorDownscale(opt, use_four_level_net).to(opt.device)
     else:
         netD = models.WDiscriminator(opt).to(opt.device)
     netD.apply(models.weights_init)
