@@ -288,6 +288,7 @@ class ResNet101(nn.Module):
         loss = F.cross_entropy(predict, target, weight=weight, size_average=size_average)
         return loss    
 
+
 def freeze_bn_func(m):
     if m.__class__.__name__.find('BatchNorm') != -1 or isinstance(m, SynchronizedBatchNorm2d)\
         or isinstance(m, nn.BatchNorm2d):
