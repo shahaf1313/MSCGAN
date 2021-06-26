@@ -64,6 +64,7 @@ def get_arguments():
 
     # Semseg network parameters:
     parser.add_argument("--model", type=str, required=False, default='DeepLab', help="available options : DeepLab and VGG")
+    parser.add_argument("--num_classes", type=int, required=False, default=19, help="Number of classes in the segmentation task. Default - 19")
     parser.add_argument('--epochs_semseg', type=int, default=12, help='number of epochs to train semseg model')
     parser.add_argument("--multiscale_model_path", type=str, default='', help="path to Generators from source to target domain and vice versa.")
     parser.add_argument("--semseg_model_path", type=str, default='', help="path to folder that contains classifier and feature extractor weights.")

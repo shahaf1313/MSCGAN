@@ -6,6 +6,7 @@ import torch.utils.data
 from functools import partial
 from core.constants import MAX_CHANNELS_PER_LAYER
 from core.sync_batchnorm import convert_model
+from semseg_models.deeplabv2 import Deeplab
 import numpy as np
 import time
 from core.constants import H, W
@@ -15,6 +16,8 @@ import signal, os, sys
 
 
 def train(opt):
+    #todo: delete after finish coding the semseg stage!
+    semseg_cs = None
     if opt.continue_train_from_path != '':
         Gst, Gts, Dst, Dts = load_trained_networks(opt)
         assert len(Gst) == len(Gts) == len(Dst) == len(Dts)
@@ -50,22 +53,32 @@ def train(opt):
             else:
                 Dst_curr, Gst_curr = init_models(opt)
                 Dts_curr, Gts_curr = init_models(opt)
+                if opt.curr_scale == opt.num_scales: #Last scale, add semseg network:
+                    semseg_cs = Deeplab(nn.BatchNorm2d, opt.num_classes)
+                else:
+                    semseg_cs = None
 
             #add networks to GracefulExit:
             graceful_exit.Gst.append(Gst_curr)
             graceful_exit.Gts.append(Gts_curr)
             graceful_exit.Dst.append(Dst_curr)
             graceful_exit.Dts.append(Dts_curr)
+            if opt.curr_scale == opt.num_scales: #Last scale, save semseg network:
+                graceful_exit.semseg_cs = semseg_cs
 
             # todo: implement DistributedDataParallel using the tutorial form pytorch's website!
             if len(opt.gpus) > 1: #Use data parallel and SyncBatchNorm
                 Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr)).to(opt.device), convert_model(nn.DataParallel(Gst_curr)).to(opt.device)
                 Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr)).to(opt.device), convert_model(nn.DataParallel(Gts_curr)).to(opt.device)
-                print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
+                if opt.curr_scale == opt.num_scales: #Last scale, convert also the semseg network to DP+SBN:
+                    semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
 
-
+            print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
+            if opt.curr_scale == opt.num_scales: #Last scale, print semseg network:
+                print(semseg_cs)
             scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
-                                            opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch)
+                                            opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch,
+                                            semseg_cs=semseg_cs)
             for net in scale_nets:
                 net = functions.reset_grads(net, False)
                 net.eval()
@@ -89,7 +102,8 @@ def train(opt):
         opt.tb.close()
         return
 
-def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list, opt, resume=False, epoch_num_to_resume=1):
+def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list,
+                       opt, resume=False, epoch_num_to_resume=1, semseg_cs=None):
         # setup optimizers and schedulers:
         optimizerDst = optim.Adam(netDst.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
         optimizerGst = optim.Adam(netGst.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
@@ -408,7 +422,9 @@ def handler(nets_dict, signum, frame):
         torch.save(nets_dict['Gts'], '%s/Gts.pth' % (nets_dict['out_path']))
         torch.save(nets_dict['Dst'], '%s/Dst.pth' % (nets_dict['out_path']))
         torch.save(nets_dict['Dts'], '%s/Dts.pth' % (nets_dict['out_path']))
-        print('\nExited unexpectedly. Pyramids has been saved successfully.')
+        if nets_dict['semseg_cs'] != None:
+            torch.save(nets_dict['semseg_cs'], '%s/semseg_cs.pth' % (nets_dict['out_path']))
+        print('\nExited unexpectedly. Pyramids & semseg has been saved successfully.')
         print('Length of pyramid list:', len(nets_dict['Gst']))
         print('Exiting. Bye!')
     sys.exit(0)
@@ -420,10 +436,12 @@ class GracefulExit:
         self.Gts = []
         self.Dst = []
         self.Dts = []
+        self.semseg_cs = None
         self.net_dict = {'Gts' : self.Gts,
                          'Gst' : self.Gst,
                          'Dts' : self.Dts,
                          'Dst' : self.Dst,
+                         'semseg_cs' : self.semseg_cs,
                          'out_path' : path_to_save_networks,
                          'debug' : is_debug}
 
