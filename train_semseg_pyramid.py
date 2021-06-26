@@ -5,6 +5,7 @@ from data import CreateSrcDataLoader, CreateTrgDataLoader
 from core.functions import denorm, colorize_mask
 import numpy as np
 import time
+from core.sync_batchnorm import convert_model
 from core.constants import NUM_CLASSES, IGNORE_LABEL, trainId2label
 from core.functions import compute_cm_batch_torch, compute_iou_torch, imresize_torch
 import torch
@@ -47,8 +48,8 @@ def main():
         # for scale in range(len(Gst)):
         #     Gst[scale] = nn.DataParallel(Gst[scale])
         #     Gts[scale] = nn.DataParallel(Gts[scale])
-        feature_extractor_cs, classifier_cs   = nn.DataParallel(feature_extractor_cs), nn.DataParallel(classifier_cs)
-        feature_extractor_gta, classifier_gta = nn.DataParallel(feature_extractor_gta), nn.DataParallel(classifier_gta)
+        feature_extractor_cs, classifier_cs   = convert_model(nn.DataParallel(feature_extractor_cs)).to(opt.device),  convert_model(nn.DataParallel(classifier_cs)).to(opt.device)
+        feature_extractor_gta, classifier_gta = convert_model(nn.DataParallel(feature_extractor_gta)).to(opt.device), convert_model(nn.DataParallel(classifier_gta)).to(opt.device)
 
     print('######### Network created #########')
     print('Architecture of Semantic Segmentation network:\n' + str(classifier_cs) + str(feature_extractor_cs))
@@ -60,6 +61,7 @@ def main():
     epoch_num = 1 if opt.semseg_model_epoch_to_resume < 0 else opt.semseg_model_epoch_to_resume + 1
     start = time.time()
     keep_training = True
+    opt.save_pics_rate = int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / opt.batch_size / opt.pics_per_epoch)
     total_steps = opt.epochs_semseg * int(opt.epoch_size / opt.batch_size)
 
     while keep_training:

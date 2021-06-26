@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 import torch
 from core.sync_batchnorm.batchnorm import SynchronizedBatchNorm2d
-from torch.autograd import Variable
+from core.constants import IGNORE_LABEL
 affine_par = True
 
 
@@ -65,7 +65,7 @@ class Classifier_Module(nn.Module):
         out = self.conv2d_list[0](x)
         for i in range(len(self.conv2d_list) - 1):
             out += self.conv2d_list[i + 1](x)
-            return out
+        return out
 
 class SEBlock(nn.Module):
     def __init__(self, inplanes, r = 16):
@@ -163,8 +163,7 @@ class ResNet101(nn.Module):
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = BatchNorm(64, affine=affine_par)
-        # for i in self.bn1.parameters():
-        #     i.requires_grad = False
+
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1, ceil_mode=True)  # change
         self.layer1 = self._make_layer(block, 64, layers[0], BatchNorm=BatchNorm)
@@ -206,7 +205,7 @@ class ResNet101(nn.Module):
     def _make_pred_layer(self, block, inplanes, dilation_series, padding_series, num_classes):
         return block(inplanes, dilation_series, padding_series, num_classes)
 
-    def forward(self, x, ssl=False, lbl=None):
+    def forward(self, x, lbl=None):
         _, _, h, w = x.size()
         x = self.conv1(x)
         x = self.bn1(x)
@@ -219,16 +218,11 @@ class ResNet101(nn.Module):
         if self.bn_clr:
             x = self.bn_pretrain(x)
 
-        out = self.layer5(x, get_feat=True)
-        # out = dict()
-        # out['feat'] = x
-        # x = self.layer5(x)
-        
-        # if not ssl:
-        #     x = nn.functional.upsample(x, (h, w), mode='bilinear', align_corners=True)
-        #     if lbl is not None:
-        #         self.loss = self.CrossEntropy2d(x, lbl)    
-        # out['out'] = x
+        out = self.layer5(x, get_feat=False)
+        out = F.interpolate(out, size=(h,w), mode='bilinear', align_corners=True)
+        if lbl is not None:
+            loss = self.CrossEntropy2d(out, lbl)
+            return out, loss
         return out
 
     def get_1x_lr_params(self):
@@ -271,21 +265,25 @@ class ResNet101(nn.Module):
         if len(optimizer.param_groups) > 1:
             optimizer.param_groups[1]['lr'] = lr * 10  
             
-    def CrossEntropy2d(self, predict, target, weight=None, size_average=True):
+    def CrossEntropy2d(self, predict, target):
         assert not target.requires_grad
         assert predict.dim() == 4
         assert target.dim() == 3
         assert predict.size(0) == target.size(0), "{0} vs {1} ".format(predict.size(0), target.size(0))
         assert predict.size(2) == target.size(1), "{0} vs {1} ".format(predict.size(2), target.size(1))
         assert predict.size(3) == target.size(2), "{0} vs {1} ".format(predict.size(3), target.size(3))
-        n, c, h, w = predict.size()
-        target_mask = (target >= 0) * (target != 255)
-        target = target[target_mask]
-        if not target.data.dim():
-            return Variable(torch.zeros(1))
-        predict = predict.transpose(1, 2).transpose(2, 3).contiguous()
-        predict = predict[target_mask.view(n, h, w, 1).repeat(1, 1, 1, c)].view(-1, c)
-        loss = F.cross_entropy(predict, target, weight=weight, size_average=size_average)
+        # todo: Shahaf added
+        # target = F.one_hot(target).permute(0,3,1,2)
+        ce_loss = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
+        loss = ce_loss(predict, target)
+        # todo: end
+        # original code:
+        # n, c, h, w = predict.size()
+        # target_mask = (target >= 0) * (target != IGNORE_LABEL)
+        # target = target[target_mask]
+        # predict = predict.transpose(1, 2).transpose(2, 3).contiguous()
+        # predict = predict[target_mask.view(n, h, w, 1).repeat(1, 1, 1, c)].view(-1, c)
+        # loss = F.cross_entropy(predict, target, weight=weight, size_average=size_average)
         return loss    
 
 

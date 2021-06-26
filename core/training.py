@@ -5,44 +5,14 @@ import torch.optim as optim
 import torch.utils.data
 from functools import partial
 from core.constants import MAX_CHANNELS_PER_LAYER
+from core.sync_batchnorm import convert_model
 import numpy as np
 import time
 from core.constants import H, W
 from core.functions import imresize_torch
 from torch.utils.tensorboard import SummaryWriter
 import signal, os, sys
-import torch.distributed as dist
-import torch.multiprocessing as mp
 
-def setup(rank, world_size):
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-
-    # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size)
-
-def cleanup():
-    dist.destroy_process_group()
-
-
-def demo_basic(model, rank, world_size):
-    print(f"Running basic DDP example on rank {rank}.")
-    setup(rank, world_size)
-
-    # create model and move it to GPU with id rank
-    model = model.to(rank)
-    ddp_model = nn.parallel.DistributedDataParallel(model, device_ids=[rank])
-    cleanup()
-
-
-def run_demo(demo_fn, world_size):
-    mp.spawn(demo_fn,
-             args=(world_size,),
-             nprocs=world_size,
-             join=True)
-
-# (Shahaf) It might be that to use DDP correctly all you need to do is to run the following line:
-# run_demo(demo_basic, num_of_gpus)
 
 def train(opt):
     if opt.continue_train_from_path != '':
@@ -88,11 +58,10 @@ def train(opt):
             graceful_exit.Dts.append(Dts_curr)
 
             # todo: implement DistributedDataParallel using the tutorial form pytorch's website!
-            if len(opt.gpus) > 1: #Use data parallel and SyncBatchnorm
-                # Dst_curr, Gst_curr = nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Dst_curr)), nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Gst_curr))
-                # Dts_curr, Gts_curr = nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Dts_curr)), nn.parallel.DistributedDataParallel(nn.SyncBatchNorm.convert_sync_batchnorm(Gts_curr))
-                Dst_curr, Gst_curr = nn.DataParallel(Dst_curr), nn.DataParallel(Gst_curr)
-                Dts_curr, Gts_curr = nn.DataParallel(Dts_curr), nn.DataParallel(Gts_curr)
+            if len(opt.gpus) > 1: #Use data parallel and SyncBatchNorm
+                Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr)).to(opt.device), convert_model(nn.DataParallel(Gst_curr)).to(opt.device)
+                Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr)).to(opt.device), convert_model(nn.DataParallel(Gts_curr)).to(opt.device)
+                print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
 
 
             scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
@@ -284,8 +253,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
 def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales, opt, real_segmaps=None):
     # train with real image
-    # output = netD(real_images).to(opt.device)
-    output = netD(real_images)
+    output = netD(real_images).to(opt.device)
+    # output = netD(real_images)
     errD_real = -1 * opt.lambda_adversarial * output.mean()
     errD_real.backward(retain_graph=True)
     D_x = errD_real.item()
@@ -405,7 +374,6 @@ def init_models(opt):
     else:
         netG = models.ConvGenerator(opt).to(opt.device)
     netG.apply(models.weights_init)
-    print(netG)
 
 
     # discriminator initialization:
@@ -414,7 +382,6 @@ def init_models(opt):
     else:
         netD = models.WDiscriminator(opt).to(opt.device)
     netD.apply(models.weights_init)
-    print(netD)
 
     return netD, netG
 
