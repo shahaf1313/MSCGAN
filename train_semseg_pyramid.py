@@ -9,6 +9,7 @@ from core.constants import NUM_CLASSES, IGNORE_LABEL, trainId2label
 from core.functions import compute_cm_batch_torch, compute_iou_torch, imresize_torch
 import torch
 import os
+from core.sync_batchnorm import convert_model
 from torch.utils.tensorboard import SummaryWriter
 
 def main():
@@ -21,11 +22,11 @@ def main():
     Gts = torch.load(os.path.join(opt.multiscale_model_path, 'Gst.pth'), map_location='cpu')
     opt.curr_scale = len(Gst)
     opt.num_scales = len(Gst)
-    for scaleGst, scaleGsts in zip(Gst,Gts):
-        scaleGst.eval()
-        scaleGst.to(opt.device)
-        scaleGsts.eval()
-        scaleGsts.to(opt.device)
+    for i, (scaleGst, scaleGsts) in enumerate(zip(Gst,Gts)):
+        Gst[i] = scaleGst.eval()
+        Gst[i] = scaleGst.to(opt.device)
+        Gts[i] = scaleGsts.eval()
+        Gts[i] = scaleGsts.to(opt.device)
 
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label=True)
@@ -34,21 +35,21 @@ def main():
 
     #Semseg To Cityscapes dataset:
     feature_extractor_cs, classifier_cs, optimizer_fea_cs, optimizer_cls_cs = CreateSemsegPyramidModel(opt, 'CS')
-    scheduler_fea_cs = torch.optim.lr_scheduler.StepLR(optimizer_fea_cs, step_size=5,gamma=0.9)
-    scheduler_cls_cs = torch.optim.lr_scheduler.StepLR(optimizer_cls_cs, step_size=5, gamma=0.9)
+    scheduler_fea_cs = torch.optim.lr_scheduler.StepLR(optimizer_fea_cs, step_size=10,gamma=0.9)
+    scheduler_cls_cs = torch.optim.lr_scheduler.StepLR(optimizer_cls_cs, step_size=10, gamma=0.9)
 
     #Semseg To GTA5 dataset:
     feature_extractor_gta, classifier_gta, optimizer_fea_gta, optimizer_cls_gta = CreateSemsegPyramidModel(opt, 'GTA')
-    scheduler_fea_gta = torch.optim.lr_scheduler.StepLR(optimizer_fea_gta, step_size=5,gamma=0.9)
-    scheduler_cls_gta = torch.optim.lr_scheduler.StepLR(optimizer_cls_gta, step_size=5, gamma=0.9)
+    scheduler_fea_gta = torch.optim.lr_scheduler.StepLR(optimizer_fea_gta, step_size=10,gamma=0.9)
+    scheduler_cls_gta = torch.optim.lr_scheduler.StepLR(optimizer_cls_gta, step_size=10, gamma=0.9)
 
     # Convert to DataPatallel object if needed:
     if len(opt.gpus) > 1:
         # for scale in range(len(Gst)):
-        #     Gst[scale] = nn.DataParallel(Gst[scale])
-        #     Gts[scale] = nn.DataParallel(Gts[scale])
-        feature_extractor_cs, classifier_cs   = nn.DataParallel(feature_extractor_cs), nn.DataParallel(classifier_cs)
-        feature_extractor_gta, classifier_gta = nn.DataParallel(feature_extractor_gta), nn.DataParallel(classifier_gta)
+        #     Gst[scale] = convert_model(nn.DataParallel(Gst[scale])).to(opt.device)
+        #     Gts[scale] = convert_model(nn.DataParallel(Gts[scale])).to(opt.device)
+        feature_extractor_cs, classifier_cs   = convert_model(nn.DataParallel(feature_extractor_cs)).to(opt.device),   convert_model(nn.DataParallel(classifier_cs)).to(opt.device)
+        feature_extractor_gta, classifier_gta = convert_model(nn.DataParallel(feature_extractor_gta)).to(opt.device),  convert_model(nn.DataParallel(classifier_gta)).to(opt.device)
 
     print('######### Network created #########')
     print('Architecture of Semantic Segmentation network:\n' + str(classifier_cs) + str(feature_extractor_cs))
@@ -61,6 +62,7 @@ def main():
     start = time.time()
     keep_training = True
     total_steps = opt.epochs_semseg * int(opt.epoch_size / opt.batch_size)
+    opt.save_pics_rate = int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / opt.batch_size / opt.pics_per_epoch)
 
     while keep_training:
         print('semeg train: starting epoch %d...' % (epoch_num))
