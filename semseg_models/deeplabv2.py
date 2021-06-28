@@ -256,11 +256,11 @@ class ResNet101(nn.Module):
                 yield i
 
     def optim_parameters(self, args):
-        return [{'params': self.get_1x_lr_params(), 'lr': args.learning_rate},
-                {'params': self.get_10x_lr_params(), 'lr': 10 * args.learning_rate}]
+        return [{'params': self.get_1x_lr_params(), 'lr': args.lr_semseg},
+                {'params': self.get_10x_lr_params(), 'lr': 10 * args.lr_semseg}]
     
     def adjust_learning_rate(self, args, optimizer, i):
-        lr = args.learning_rate * ((1 - float(i) / args.num_steps) ** (args.power))
+        lr = args.lr_semseg * ((1 - float(i) / args.num_steps) ** (args.power))
         optimizer.param_groups[0]['lr'] = lr
         if len(optimizer.param_groups) > 1:
             optimizer.param_groups[1]['lr'] = lr * 10  
@@ -293,7 +293,7 @@ def freeze_bn_func(m):
         m.weight.requires_grad = False
         m.bias.requires_grad = False
 
-def Deeplab(BatchNorm, num_classes=21, freeze_bn=False, restore_from=None, initialization=None, bn_clr=False):
+def DeeplabV2(BatchNorm, num_classes=21, freeze_bn=False, restore_from=None, initialization=None, bn_clr=False):
     model = ResNet101(Bottleneck, [3, 4, 23, 3], num_classes, BatchNorm, bn_clr=bn_clr)
     if freeze_bn:
         model.apply(freeze_bn_func)

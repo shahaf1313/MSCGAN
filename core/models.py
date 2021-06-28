@@ -15,16 +15,29 @@ class ConvBlock(nn.Sequential):
 class ConvBlockSpade(nn.Module):
     def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, activation='lrelu'):
         super(ConvBlockSpade, self).__init__()
-        self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
+        self._warmup = True
         self.spade = SPADE(norm_type, ker_size, out_channel, label_nc=3)
+        self.bn = nn.BatchNorm2d(out_channel)
+        self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
         if activation=='lrelu':
             self.actvn = nn.LeakyReLU(0.2)
         elif activation=='tanh':
             self.actvn = nn.Tanh()
 
     def forward(self, x, seg_map):
-        z = self.conv(self.actvn(self.spade(x, seg_map)))
+        if self._warmup:
+            z = self.conv(self.actvn(self.bn(x)))
+        else:
+            z = self.conv(self.actvn(self.spade(x, seg_map)))
         return z
+
+    @property
+    def warmup(self):
+        return self._warmup
+
+    @warmup.setter
+    def warmup(self, val):
+        self._warmup = val
 
 class ConvGenerator(nn.Module):
     def __init__(self, opt):
@@ -57,14 +70,15 @@ class LabelConditionedGenerator(nn.Module):
     def __init__(self, opt):
         super(LabelConditionedGenerator, self).__init__()
         self.is_initial_scale = opt.curr_scale == 0
+        self._warmup = True
         alpha = 1 if self.is_initial_scale else 0
         self.head = ConvBlockSpade((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
         self.body = nn.Sequential()
         for i in range(opt.num_layer-2):
             block = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
             self.body.add_module('block%d'%(i+1),block)
-        self.tail = ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type, activation='tanh')
-
+        self.tail = ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
+        self.final_actvn = nn.Tanh()
     def forward(self, curr_scale, prev_scale, seg_map):
         if self.is_initial_scale:
             z = curr_scale
@@ -73,9 +87,21 @@ class LabelConditionedGenerator(nn.Module):
         z = self.head(z, seg_map)
         z = self.body(z, seg_map)
         z = self.tail(z, seg_map)
+        z = self. final_actvn(z)
         # ind = int((prev_scale.shape[2]-curr_scale.shape[2])/2)
         # z = z[:,:,ind:(prev_scale.shape[2]-ind),ind:(curr_scale.shape[3]-ind)]
         return z
+
+    @property
+    def warmup(self):
+        return self._warmup
+
+    @warmup.setter
+    def warmup(self, val):
+        self.head.warmup = val
+        for block in self.body:
+            block.warmup = val
+        self.tail.warmup = val
    
 class WDiscriminator(nn.Module):
     def __init__(self, opt):
@@ -103,8 +129,9 @@ def weights_init(m):
     if classname.find('Conv2d') != -1:
         m.weight.data.normal_(0.0, 0.02)
     elif classname.find('Norm') != -1:
-        m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
+        if m.affine == True:
+            m.weight.data.normal_(1.0, 0.02)
+            m.bias.data.fill_(0)
 
 class UNetGeneratorFourLayers(nn.Module):
 

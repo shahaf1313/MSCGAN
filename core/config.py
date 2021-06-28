@@ -34,7 +34,7 @@ def get_arguments():
     parser.add_argument('--batch_size_list', type=int, nargs='+', help="batch size in each one of the scales", default=[0])
     parser.add_argument('--norm_type', type=str, default='batch_norm')
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
-    parser.add_argument('--use_conditinal_generator', default=False, action='store_true', help='Uses label conditioned generator')
+    parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs before switching to label conditioned generator.')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
     parser.add_argument('--nfc', type=int, default=8)
     parser.add_argument('--ker_size', type=int, help='kernel size', default=3)
@@ -63,7 +63,7 @@ def get_arguments():
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
 
     # Semseg network parameters:
-    parser.add_argument("--model", type=str, required=False, default='DeepLab', help="available options : DeepLab and VGG")
+    parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLab and VGG")
     parser.add_argument("--num_classes", type=int, required=False, default=19, help="Number of classes in the segmentation task. Default - 19")
     parser.add_argument('--epochs_semseg', type=int, default=12, help='number of epochs to train semseg model')
     parser.add_argument("--multiscale_model_path", type=str, default='', help="path to Generators from source to target domain and vice versa.")

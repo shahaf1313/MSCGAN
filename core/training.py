@@ -6,7 +6,7 @@ import torch.utils.data
 from functools import partial
 from core.constants import MAX_CHANNELS_PER_LAYER
 from core.sync_batchnorm import convert_model
-from semseg_models.deeplabv2 import Deeplab
+from semseg_models import CreateSemsegModel
 import numpy as np
 import time
 from core.constants import H, W
@@ -16,10 +16,9 @@ import signal, os, sys
 
 
 def train(opt):
-    #todo: delete after finish coding the semseg stage!
-    semseg_cs = None
     if opt.continue_train_from_path != '':
         Gst, Gts, Dst, Dts = load_trained_networks(opt)
+        # todo: add loading semseg network
         assert len(Gst) == len(Gts) == len(Dst) == len(Dts)
         scale_num = len(Gst) - 1 if opt.resume_to_epoch > 0 else len(Gst)
         resume_first_iteration = True if opt.resume_to_epoch > 0 else False
@@ -35,6 +34,7 @@ def train(opt):
     with graceful_exit:
         while scale_num < opt.num_scales + 1:
             opt.curr_scale = scale_num
+            opt.last_scale = opt.curr_scale == opt.num_scales
             opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale+1)/2)))))
             opt.outf = '%s/%d' % (opt.out_, scale_num)
             try:
@@ -53,8 +53,8 @@ def train(opt):
             else:
                 Dst_curr, Gst_curr = init_models(opt)
                 Dts_curr, Gts_curr = init_models(opt)
-                if opt.curr_scale == opt.num_scales: #Last scale, add semseg network:
-                    semseg_cs = Deeplab(nn.BatchNorm2d, opt.num_classes)
+                if opt.last_scale: #Last scale, add semseg network:
+                    semseg_cs, _ = CreateSemsegModel(opt)
                 else:
                     semseg_cs = None
 
@@ -63,18 +63,18 @@ def train(opt):
             graceful_exit.Gts.append(Gts_curr)
             graceful_exit.Dst.append(Dst_curr)
             graceful_exit.Dts.append(Dts_curr)
-            if opt.curr_scale == opt.num_scales: #Last scale, save semseg network:
+            if opt.last_scale: #Last scale, save semseg network:
                 graceful_exit.semseg_cs = semseg_cs
 
             # todo: implement DistributedDataParallel using the tutorial form pytorch's website!
             if len(opt.gpus) > 1: #Use data parallel and SyncBatchNorm
                 Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr)).to(opt.device), convert_model(nn.DataParallel(Gst_curr)).to(opt.device)
                 Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr)).to(opt.device), convert_model(nn.DataParallel(Gts_curr)).to(opt.device)
-                if opt.curr_scale == opt.num_scales: #Last scale, convert also the semseg network to DP+SBN:
+                if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
                     semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
 
             print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
-            if opt.curr_scale == opt.num_scales: #Last scale, print semseg network:
+            if opt.last_scale: #Last scale, print semseg network:
                 print(semseg_cs)
             scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
                                             opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch,
@@ -109,7 +109,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         optimizerGst = optim.Adam(netGst.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
         optimizerDts = optim.Adam(netDts.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
         optimizerGts = optim.Adam(netGts.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
-
+        if opt.last_scale:
+            _, optimizerSemseg = CreateSemsegModel(opt)
 
         batch_size = opt.source_loaders[opt.curr_scale].batch_size
         opt.save_pics_rate = int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size / opt.pics_per_epoch)
@@ -127,7 +128,12 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         while keep_training:
             print('scale %d: starting epoch %d...' % (opt.curr_scale, epoch_num))
             epoch_num += 1
-            for batch_num, (source_scales, target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
+            # Set conditioned generators' warmup according to current epoch:
+            if opt.last_scale:
+                opt.warmup = epoch_num <= opt.warmup_epochs
+                netGts.warmup = opt.warmup
+
+            for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
                 if steps > total_steps_per_scale:
                     keep_training = False
                     break
@@ -135,7 +141,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     keep_training = False
                     break
 
-                # Move scale tensors to CUDA:
+                # Move scale and label tensors to CUDA:
+                source_label = source_label.to(opt.device)
                 for i in range(len(source_scales)):
                     source_scales[i] = source_scales[i].to(opt.device)
                     target_scales[i] = target_scales[i].to(opt.device)
@@ -145,6 +152,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     prev_sit = concat_pyramid(Gst, source_scales, opt)
                     prev_tis = concat_pyramid(Gts, target_scales, opt)
 
+                # todo: finidhed code re-design till this point. Continue from here:
                 ############################
                 # (1) Update D networks: maximize D(x) + D(G(z))
                 ###########################
@@ -248,8 +256,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                     save_pics_int += 1
 
-                # Save network checkpoint every 2k steps:
-                if steps > checkpoint_int * 2000:
+                # Save network checkpoint every 1k steps:
+                if steps > checkpoint_int * 1000:
                     print('scale %d: saving networks after %d steps...' % (opt.curr_scale, steps))
                     if (len(opt.gpus) > 1):
                         functions.save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt)
@@ -276,7 +284,7 @@ def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales
     # train with fake
     curr = from_scales[opt.curr_scale]
     with torch.no_grad():
-        fake_images = netG(curr, prev, real_segmaps) if opt.use_conditinal_generator else netG(curr, prev)
+        fake_images = netG(curr, prev, real_segmaps) if opt.last_scale else netG(curr, prev)
     output = netD(fake_images.detach())
     errD_fake =  opt.lambda_adversarial * output.mean()
     errD_fake.backward(retain_graph=True)
@@ -295,7 +303,7 @@ def adversarial_generative_train(netG, netD, prev, from_scales, opt, seg_maps=No
     ##todo: I added!
     # train with fake
     curr = from_scales[opt.curr_scale]
-    fake = netG(curr, prev, seg_maps) if opt.use_conditinal_generator else netG(curr, prev)
+    fake = netG(curr, prev, seg_maps) if opt.last_scale else netG(curr, prev)
     ##end
 
     output = netD(fake)
@@ -311,7 +319,7 @@ def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
     criterion_tst = nn.L1Loss()
 
     #source in target:
-    sit_image = currGst(source_batch, prev_sit, segmap_source) if opt.use_conditinal_generator else currGst(source_batch, prev_sit)
+    sit_image = currGst(source_batch, prev_sit, segmap_source) if opt.last_scale else currGst(source_batch, prev_sit)
     # todo: make sure that segmentation network is passed correctly:
     # created_segmap_target = net_seg_target(sit_image)
     created_segmap_target = None
@@ -319,7 +327,7 @@ def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
         generated_pyramid_sit = functions.GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
         prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt)
     #source in target in source:
-    sitis_image = currGts(sit_image, prev_sit_generated, created_segmap_target) if opt.use_conditinal_generator else currGts(sit_image, prev_sit_generated)
+    sitis_image = currGts(sit_image, prev_sit_generated, created_segmap_target) if opt.last_scale else currGts(sit_image, prev_sit_generated)
     loss_sts = opt.lambda_cyclic * criterion_sts(sitis_image, source_batch)
     loss_sts.backward()
 
@@ -383,10 +391,11 @@ def init_models(opt):
         else:
             print('Generating 2 layers UNET model')
             netG = models.UNetGeneratorTwoLayers(opt).to(opt.device)
-    elif opt.use_conditinal_generator:
-        netG = models.LabelConditionedGenerator(opt).to(opt.device)
-    else:
-        netG = models.ConvGenerator(opt).to(opt.device)
+    else: #Conditial Generator(!):
+        if opt.curr_scale == opt.num_scales: # last scale, initialize label conditioning:
+            netG = models.LabelConditionedGenerator(opt).to(opt.device)
+        else: # not last scale, use regular generator:
+            netG = models.ConvGenerator(opt).to(opt.device)
     netG.apply(models.weights_init)
 
 
