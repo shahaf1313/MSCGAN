@@ -114,23 +114,23 @@ class UNetGeneratorFourLayers(nn.Module):
         self.is_initial_scale = opt.curr_scale == 0
 
         self.dconv_down1 = LocalNet(3 if self.is_initial_scale else 6, 16)
-        self.dconv_down2 = LocalNet(16, 32)
-        self.dconv_down3 = LocalNet(32, 64)
-        self.dconv_down4 = LocalNet(64, 128)
-        self.dconv_down5 = LocalNet(128, 128)
+        self.dconv_down2 = LocalNet(16, 16)
+        self.dconv_down3 = LocalNet(16, 16)
+        self.dconv_down4 = LocalNet(16, 16)
+        self.dconv_down5 = LocalNet(16, 16)
 
         self.maxpool = nn.MaxPool2d(2, padding=0)
 
         self.upsample = nn.UpsamplingNearest2d(scale_factor=2)
-        self.up_conv1x1_1 = nn.Conv2d(128, 128, 1)
-        self.up_conv1x1_2 = nn.Conv2d(128, 128, 1)
-        self.up_conv1x1_3 = nn.Conv2d(64, 64, 1)
-        self.up_conv1x1_4 = nn.Conv2d(32, 32, 1)
+        self.up_conv1x1_1 = nn.Conv2d(16, 16, 1)
+        self.up_conv1x1_2 = nn.Conv2d(16, 16, 1)
+        self.up_conv1x1_3 = nn.Conv2d(16, 16, 1)
+        self.up_conv1x1_4 = nn.Conv2d(16, 16, 1)
 
-        self.dconv_up4 = LocalNet(256, 128)
-        self.dconv_up3 = LocalNet(192, 64)
-        self.dconv_up2 = LocalNet(96, 32)
-        self.dconv_up1 = LocalNet(48, 16)
+        self.dconv_up4 = LocalNet(32, 16)
+        self.dconv_up3 = LocalNet(32, 16)
+        self.dconv_up2 = LocalNet(32, 16)
+        self.dconv_up1 = LocalNet(32, 16)
 
         self.conv_last = LocalNet(16, 3)
 
@@ -220,20 +220,20 @@ class UNetGeneratorTwoLayers(nn.Module):
         super().__init__()
         self.is_initial_scale = opt.curr_scale == 0
 
-        self.dconv_down1 = LocalNet(3 if self.is_initial_scale else 6, 16)
-        self.dconv_down2 = LocalNet(16, 32)
-        self.dconv_down3 = LocalNet(32, 32)
+        self.dconv_down1 = LocalNet(3 if self.is_initial_scale else 6, 8)
+        self.dconv_down2 = LocalNet(8, 8)
+        self.dconv_down3 = LocalNet(8, 8)
 
         self.maxpool = nn.MaxPool2d(2, padding=0)
 
         self.upsample = nn.UpsamplingNearest2d(scale_factor=2)
-        self.up_conv1x1_1 = nn.Conv2d(32, 32, 1)
-        self.up_conv1x1_2 = nn.Conv2d(32, 32, 1)
+        self.up_conv1x1_1 = nn.Conv2d(8, 8, 1)
+        self.up_conv1x1_2 = nn.Conv2d(8, 8, 1)
 
-        self.dconv_up2 = LocalNet(64, 32)
-        self.dconv_up1 = LocalNet(48, 16)
+        self.dconv_up2 = LocalNet(16, 8)
+        self.dconv_up1 = LocalNet(16, 8)
 
-        self.conv_last = LocalNet(16, 3)
+        self.conv_last = LocalNet(8, 3)
 
     def forward(self, curr_scale, prev_scale):
 
