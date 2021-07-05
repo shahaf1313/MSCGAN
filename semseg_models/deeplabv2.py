@@ -275,7 +275,7 @@ class ResNet101(nn.Module):
         # todo: Shahaf added
         # target = F.one_hot(target).permute(0,3,1,2)
         ce_loss = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
-        loss = ce_loss(predict, target)
+        loss = ce_loss(predict, target.type(torch.long))
         # todo: end
         # original code:
         # n, c, h, w = predict.size()

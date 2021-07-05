@@ -5,7 +5,7 @@ import math
 from skimage import io as img
 from skimage import color
 from PIL import Image
-from core.constants import palette
+from core.constants import palette, NUM_CLASSES, IGNORE_LABEL
 
 
 def denorm(x):
@@ -165,3 +165,9 @@ def RGBImageToNumpy(im):
     im = np.transpose(im, (2, 0, 1))
     im = (im - 128.) / 128  # change from 0..255 to -1..1
     return im
+
+def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
+    z = input.clone()
+    z[z==ignore_label] = num_classes
+    output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
+    return output

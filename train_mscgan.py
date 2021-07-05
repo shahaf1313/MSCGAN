@@ -20,7 +20,7 @@ def main():
         opt.source_loaders, opt.target_loaders = segmentation_train(opt)
 
     # adjust_scales2image(H, W, opt)
-    print('########################### MLCGAN Configuration ##############################')
+    print('########################### MSCGAN Configuration ##############################')
     for arg in vars(opt):
         print(arg + ': ' + str(getattr(opt, arg)))
     print('##################################################################################')
