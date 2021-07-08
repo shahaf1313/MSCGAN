@@ -220,6 +220,7 @@ class ResNet101(nn.Module):
 
         out = self.layer5(x, get_feat=False)
         out = F.interpolate(out, size=(h,w), mode='bilinear', align_corners=True)
+
         if lbl is not None:
             loss = self.CrossEntropy2d(out, lbl)
             return out, loss

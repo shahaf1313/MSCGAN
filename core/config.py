@@ -43,6 +43,7 @@ def get_arguments():
 
     # pyramid parameters:
     parser.add_argument('--scale_factor', type=float, help='pyramid scale factor', default=0.75)  # pow(0.5,1/6))
+    parser.add_argument('--use_half_image_size', default=False, action='store_true')
     parser.add_argument('--min_size', type=int, help='image minimal size at the coarser scale', default=None)
     parser.add_argument('--max_size', type=int, help='image maximal size at the largest scale', default=None)
     parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=None)

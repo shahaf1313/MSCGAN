@@ -160,8 +160,15 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     source_scales[i] = source_scales[i].to(opt.device)
                     target_scales[i] = target_scales[i].to(opt.device)
 
+                # Resize scale and label tensorsif needed:
+                if opt.use_half_image_size:
+                    source_label = (nn.functional.interpolate(source_label.unsqueeze(1), scale_factor=[0.5,0.5], mode='nearest')).squeeze()
+                    for i in range(len(source_scales)):
+                        source_scales[i] = torch.clamp(nn.functional.interpolate(source_scales[i], scale_factor=[0.5,0.5], mode='bicubic'), -1, 1)
+                        target_scales[i] = torch.clamp(nn.functional.interpolate(target_scales[i], scale_factor=[0.5,0.5], mode='bicubic'), -1, 1)
+
                 # Create segmentation maps if needed:
-                source_segmap = one_hot_encoder(source_label) if opt.last_scale else None
+                source_segmap = one_hot_encoder(source_label) if not opt.warmup else None
                 target_segmap = one_hot_encoder(semseg_cs(source_scales[-1]).argmax(1)) if not opt.warmup else None
 
                 # Create pyramid concatenation:
@@ -244,7 +251,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     optimizerSemseg.zero_grad()
                     optimizerGst.zero_grad()
                     semseg_labels, semseg_loss = semantic_segmentation_loss(source_scales, Gst, netGst, semseg_cs, source_label, opt)
-                    opt.tb.add_scalar('Scale%d/Semseg/SemsegCsLoss' % opt.curr_scale, semseg_loss.item(), semseg_steps)
+                    opt.tb.add_scalar('Semseg/SemsegCsLoss', semseg_loss.item(), semseg_steps)
                     optimizerSemseg.step()
                     optimizerGst.step()
                     semseg_steps += 1
@@ -379,7 +386,7 @@ def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
 
 def semantic_segmentation_loss(input_pyramid, Gs, currG, semseg_net, input_label, opt):
     prev_converted_image = concat_pyramid(Gs, input_pyramid, opt, input_label)
-    converted_image = currG(input_pyramid[-1], prev_converted_image, one_hot_encoder(input_label))
+    converted_image = currG(input_pyramid[-1], prev_converted_image, one_hot_encoder(input_label) if not opt.warmup else None)
     output_softs, semseg_loss = semseg_net(converted_image, input_label)
     semseg_loss = semseg_loss.mean()
     output_label = output_softs.argmax(1)
