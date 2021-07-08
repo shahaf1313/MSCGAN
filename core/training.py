@@ -2,16 +2,18 @@ import core.models as models
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
-from functools import partial
-from core.constants import MAX_CHANNELS_PER_LAYER
+from data.labels_info import trainId2label
+from core.constants import MAX_CHANNELS_PER_LAYER, NUM_CLASSES, IGNORE_LABEL
 from core.sync_batchnorm import convert_model
 from semseg_models import CreateSemsegModel
 import numpy as np
 import time
 from core.constants import H, W
-from core.functions import imresize_torch, colorize_mask, reset_grads, save_networks, calc_gradient_penalty, GeneratePyramid, one_hot_encoder
+from core.functions import imresize_torch, colorize_mask, reset_grads, save_networks, calc_gradient_penalty, GeneratePyramid, one_hot_encoder, compute_iou_torch, compute_cm_batch_torch, runningScore
 from torch.utils.tensorboard import SummaryWriter
-import signal, os, sys
+import os
+# from functools import partial
+# import signal, os, sys
 
 
 def train(opt):
@@ -29,87 +31,87 @@ def train(opt):
         resume_first_iteration = False
 
     opt.tb = SummaryWriter(os.path.join(opt.tb_logs_dir, opt.folder_string))
-    graceful_exit = GracefulExit(opt.out_, opt.debug_run)
-    with graceful_exit:
-        while scale_num < opt.num_scales + 1:
-            opt.curr_scale = scale_num
-            opt.last_scale = opt.curr_scale == opt.num_scales
-            opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale+1)/2)))))
-            opt.outf = '%s/%d' % (opt.out_, scale_num)
-            try:
-                os.makedirs(opt.outf)
-            except OSError:
-                pass
+    # graceful_exit = GracefulExit(opt.out_, opt.debug_run)
+    # with graceful_exit:
+    while scale_num < opt.num_scales + 1:
+        opt.curr_scale = scale_num
+        opt.last_scale = opt.curr_scale == opt.num_scales
+        opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale+1)/2)))))
+        opt.outf = '%s/%d' % (opt.out_, scale_num)
+        try:
+            os.makedirs(opt.outf)
+        except OSError:
+            pass
 
-            if resume_first_iteration:
-                curr_nets = []
-                for net_list in [Dst, Gst, Dts, Gts]:
-                    curr_net = net_list[scale_num].train()
-                    curr_nets.append(reset_grads(curr_net, True))
-                    net_list.remove(net_list[scale_num])
-                Dst_curr, Gst_curr = curr_nets[0], curr_nets[1]
-                Dts_curr, Gts_curr = curr_nets[2], curr_nets[3]
+        if resume_first_iteration:
+            curr_nets = []
+            for net_list in [Dst, Gst, Dts, Gts]:
+                curr_net = net_list[scale_num].train()
+                curr_nets.append(reset_grads(curr_net, True))
+                net_list.remove(net_list[scale_num])
+            Dst_curr, Gst_curr = curr_nets[0], curr_nets[1]
+            Dts_curr, Gts_curr = curr_nets[2], curr_nets[3]
+        else:
+            Dst_curr, Gst_curr = init_models(opt)
+            Dts_curr, Gts_curr = init_models(opt)
+            if opt.last_scale: #Last scale, add semseg network:
+                semseg_cs, _ = CreateSemsegModel(opt)
             else:
-                Dst_curr, Gst_curr = init_models(opt)
-                Dts_curr, Gts_curr = init_models(opt)
-                if opt.last_scale: #Last scale, add semseg network:
-                    semseg_cs, _ = CreateSemsegModel(opt)
-                else:
-                    semseg_cs = None
+                semseg_cs = None
 
-            #add networks to GracefulExit:
-            graceful_exit.Gst.append(Gst_curr)
-            graceful_exit.Gts.append(Gts_curr)
-            graceful_exit.Dst.append(Dst_curr)
-            graceful_exit.Dts.append(Dts_curr)
-            if opt.last_scale: #Last scale, save semseg network:
-                graceful_exit.semseg_cs = semseg_cs
+        # #add networks to GracefulExit:
+        # graceful_exit.Gst.append(Gst_curr)
+        # graceful_exit.Gts.append(Gts_curr)
+        # graceful_exit.Dst.append(Dst_curr)
+        # graceful_exit.Dts.append(Dts_curr)
+        # if opt.last_scale: #Last scale, save semseg network:
+        #     graceful_exit.semseg_cs = semseg_cs
 
-            # todo: implement DistributedDataParallel using the tutorial form pytorch's website!
-            if len(opt.gpus) > 1: #Use data parallel and SyncBatchNorm
-                Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr)).to(opt.device), convert_model(nn.DataParallel(Gst_curr)).to(opt.device)
-                Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr)).to(opt.device), convert_model(nn.DataParallel(Gts_curr)).to(opt.device)
-                if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
-                    semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
+        # todo: implement DistributedDataParallel using the tutorial form pytorch's website!
+        if len(opt.gpus) > 1: #Use data parallel and SyncBatchNorm
+            Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr)).to(opt.device), convert_model(nn.DataParallel(Gst_curr)).to(opt.device)
+            Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr)).to(opt.device), convert_model(nn.DataParallel(Gts_curr)).to(opt.device)
+            if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
+                semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
 
-                # Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gst_curr, device_ids=opt.gpus)).to(opt.device)
-                # Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gts_curr, device_ids=opt.gpus)).to(opt.device)
-                # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
-                #     semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
+            # Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gst_curr, device_ids=opt.gpus)).to(opt.device)
+            # Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gts_curr, device_ids=opt.gpus)).to(opt.device)
+            # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
+            #     semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
 
-                # Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
-                # Dts_curr, Gts_curr = nn.DataParallel(Dts_curr, device_ids=opt.gpus), nn.DataParallel(Gts_curr, device_ids=opt.gpus)
-                # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
-                #     semseg_cs = nn.DataParallel(semseg_cs, device_ids=opt.gpus)
+            # Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
+            # Dts_curr, Gts_curr = nn.DataParallel(Dts_curr, device_ids=opt.gpus), nn.DataParallel(Gts_curr, device_ids=opt.gpus)
+            # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
+            #     semseg_cs = nn.DataParallel(semseg_cs, device_ids=opt.gpus)
 
-            print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
-            if opt.last_scale: #Last scale, print semseg network:
-                print(semseg_cs)
-            scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
-                                            opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch,
-                                            semseg_cs=semseg_cs)
-            for net in scale_nets:
-                net = reset_grads(net, False)
-                net.eval()
-            Dst_curr, Gst_curr, Dts_curr, Gts_curr = scale_nets
+        print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
+        if opt.last_scale: #Last scale, print semseg network:
+            print(semseg_cs)
+        scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
+                                        opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch,
+                                        semseg_cs=semseg_cs)
+        for net in scale_nets:
+            net = reset_grads(net, False)
+            net.eval()
+        Dst_curr, Gst_curr, Dts_curr, Gts_curr = scale_nets
 
-            Gst.append(Gst_curr)
-            Gts.append(Gts_curr)
-            Dst.append(Dst_curr)
-            Dts.append(Dts_curr)
+        Gst.append(Gst_curr)
+        Gts.append(Gts_curr)
+        Dst.append(Dst_curr)
+        Dts.append(Dts_curr)
 
-            if not opt.debug_run:
-                torch.save(Gst, '%s/Gst.pth' % (opt.out_))
-                torch.save(Gts, '%s/Gts.pth' % (opt.out_))
-                torch.save(Dst, '%s/Dst.pth' % (opt.out_))
-                torch.save(Dts, '%s/Dts.pth' % (opt.out_))
+        if not opt.debug_run:
+            torch.save(Gst, '%s/Gst.pth' % (opt.out_))
+            torch.save(Gts, '%s/Gts.pth' % (opt.out_))
+            torch.save(Dst, '%s/Dst.pth' % (opt.out_))
+            torch.save(Dts, '%s/Dts.pth' % (opt.out_))
 
-            opt.prev_base_channels = opt.base_channels
-            resume_first_iteration = False
-            scale_num += 1
+        opt.prev_base_channels = opt.base_channels
+        resume_first_iteration = False
+        scale_num += 1
 
-        opt.tb.close()
-        return
+    opt.tb.close()
+    return
 
 def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list,
                        opt, resume=False, epoch_num_to_resume=1, semseg_cs=None):
@@ -295,6 +297,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
             epoch_num += 1
 
+        # Calculate mIoU on current models:
+
         if (len(opt.gpus) > 1):
             save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt, semseg_cs.module)
             return netDst.module, netGst.module, netDts.module, netGts.module
@@ -440,40 +444,87 @@ def norm_image(im):
     assert torch.max(out) <= 1 and torch.min(out) >= 0
     return out
 
-def handler(nets_dict, signum, frame):
-    if not nets_dict['debug']:
-        torch.save(nets_dict['Gst'], '%s/Gst.pth' % (nets_dict['out_path']))
-        torch.save(nets_dict['Gts'], '%s/Gts.pth' % (nets_dict['out_path']))
-        torch.save(nets_dict['Dst'], '%s/Dst.pth' % (nets_dict['out_path']))
-        torch.save(nets_dict['Dts'], '%s/Dts.pth' % (nets_dict['out_path']))
-        if nets_dict['semseg_cs'] != None:
-            torch.save(nets_dict['semseg_cs'], '%s/semseg_cs.pth' % (nets_dict['out_path']))
-        print('\nExited unexpectedly. Pyramids & semseg has been saved successfully.')
-        print('Length of pyramid list:', len(nets_dict['Gst']))
-        print('Exiting. Bye!')
-    sys.exit(0)
+def save_epoch_accuracy(tb, set, iou, miou, epoch):
+    if set == 'Validtaion':
+        for i in range(NUM_CLASSES):
+            tb.add_scalar('%sAccuracy/%s class accuracy' % (set, trainId2label[i].name), iou[i], epoch)
+        tb.add_scalar('%sAccuracy/Accuracy History [mIoU]' % set, miou, epoch)
+    elif set == 'Test':
+        print('================Model Acuuracy Summery================')
+        for i in range(NUM_CLASSES):
+            print('%s class accuracy: = %.2f' % (trainId2label[i].name, iou[i]))
+        print('Average accuracy of test set on target domain: mIoU = %2f' % miou)
+        print('======================================================')
 
-class GracefulExit:
-    def __init__(self, path_to_save_networks, is_debug):
-        self.path_to_save_networks = path_to_save_networks
-        self.Gst = []
-        self.Gts = []
-        self.Dst = []
-        self.Dts = []
-        self.semseg_cs = None
-        self.net_dict = {'Gts' : self.Gts,
-                         'Gst' : self.Gst,
-                         'Dts' : self.Dts,
-                         'Dst' : self.Dst,
-                         'semseg_cs' : self.semseg_cs,
-                         'out_path' : path_to_save_networks,
-                         'debug' : is_debug}
+def calculte_validation_accuracy(semseg_net, target_val_loader, epoch_num, opt):
+    semseg_net.eval()
+    running_metrics_val = runningScore(NUM_CLASSES)
+    rand_samp_ind = np.random.randint(0, len(target_val_loader.dataset), 1)
+    rand_batch = np.floor(rand_samp_ind/opt.batch_size).astype(np.int)
+    cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
+    for val_batch_num, (target_images, target_labels) in enumerate(target_val_loader):
+        target_images = target_images.to(opt.device)
+        target_labels = target_labels.to(opt.device)
+        with torch.no_grad():
+            pred_softs = semseg_net(target_images)
+            pred_labels = torch.argmax(pred_softs, dim=1)
+            cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
+            running_metrics_val.update(target_labels, pred_labels)
+            if val_batch_num == rand_batch:
+                t        = norm_image(target_images[0])
+                t_lbl    = colorize_mask(target_labels[0])
+                pred_lbl = colorize_mask(pred_labels[0])
+                opt.tb.add_image('Scale%d/Semseg/Validtaion/target' % opt.curr_scale, t, epoch_num)
+                opt.tb.add_image('Scale%d/Semseg/Validtaion/target_label' % opt.curr_scale, t_lbl, epoch_num)
+                opt.tb.add_image('Scale%d/Semseg/Validtaion/prediction_label' % opt.curr_scale, pred_lbl, epoch_num)
+    iou, miou = compute_iou_torch(cm)
 
-    def __enter__(self):
-        signal.signal(signal.SIGTERM,  partial(handler, self.net_dict))
-        signal.signal(signal.SIGINT,   partial(handler, self.net_dict))
+    # proda's calc:
+    score, class_iou = running_metrics_val.get_scores()
+    for k, v in score.items():
+        print(k, v)
 
-    def __exit__(self, type, value, traceback):
-        pass
+    for k, v in class_iou.items():
+        print(k, v)
+
+    running_metrics_val.reset()
+    return iou, miou, cm
 
 
+# def handler(nets_dict, signum, frame):
+#     if not nets_dict['debug']:
+#         torch.save(nets_dict['Gst'], '%s/Gst.pth' % (nets_dict['out_path']))
+#         torch.save(nets_dict['Gts'], '%s/Gts.pth' % (nets_dict['out_path']))
+#         torch.save(nets_dict['Dst'], '%s/Dst.pth' % (nets_dict['out_path']))
+#         torch.save(nets_dict['Dts'], '%s/Dts.pth' % (nets_dict['out_path']))
+#         if nets_dict['semseg_cs'] != None:
+#             torch.save(nets_dict['semseg_cs'], '%s/semseg_cs.pth' % (nets_dict['out_path']))
+#         print('\nExited unexpectedly. Pyramids & semseg has been saved successfully.')
+#         print('Length of pyramid list:', len(nets_dict['Gst']))
+#         print('Exiting. Bye!')
+#     sys.exit(0)
+#
+# class GracefulExit:
+#     def __init__(self, path_to_save_networks, is_debug):
+#         self.path_to_save_networks = path_to_save_networks
+#         self.Gst = []
+#         self.Gts = []
+#         self.Dst = []
+#         self.Dts = []
+#         self.semseg_cs = None
+#         self.net_dict = {'Gts' : self.Gts,
+#                          'Gst' : self.Gst,
+#                          'Dts' : self.Dts,
+#                          'Dst' : self.Dst,
+#                          'semseg_cs' : self.semseg_cs,
+#                          'out_path' : path_to_save_networks,
+#                          'debug' : is_debug}
+#
+#     def __enter__(self):
+#         signal.signal(signal.SIGTERM,  partial(handler, self.net_dict))
+#         signal.signal(signal.SIGINT,   partial(handler, self.net_dict))
+#
+#     def __exit__(self, type, value, traceback):
+#         pass
+#
+#
