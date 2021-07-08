@@ -5,8 +5,8 @@ def main(opt):
     else:
         opt.image_full_size = IMG_CROP_SIZE_SEMSEG
         opt.source_loaders, opt.target_loaders = segmentation_train(opt)
+    opt.target_validation_loader = CreateTrgDataLoader(opt, set='val', get_image_label=True, get_scales_pyramid=False)
 
-    # adjust_scales2image(H, W, opt)
     print('########################### MSCGAN Configuration ##############################')
     for arg in vars(opt):
         print(arg + ': ' + str(getattr(opt, arg)))

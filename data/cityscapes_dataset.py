@@ -1,5 +1,6 @@
 import numpy as np
 from data.domainAdaptationDataset import domainAdaptationDataSet
+from core.functions import RGBImageToNumpy
 import os.path as osp
 from PIL import Image
 
@@ -27,7 +28,7 @@ class cityscapesDataSet(domainAdaptationDataSet):
         if self.get_scales_pyramid:
             scales_pyramid = self.GeneratePyramid(image)
         else:
-            image = self.RGBImageToNumpy(image)
+            image = RGBImageToNumpy(image)
 
         if self.get_scales_pyramid and self.get_image_label:
             return scales_pyramid, label_copy.copy()

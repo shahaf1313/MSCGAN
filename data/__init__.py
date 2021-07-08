@@ -48,7 +48,7 @@ def CreateTrgDataLoader(opt, set='train', get_image_label=False, get_scales_pyra
     elif set == 'val' or set == 'test':
         target_dataloader = data.DataLoader(target_dataset,
                                             batch_size=opt.batch_size,
-                                            shuffle=False,
+                                            shuffle=True,
                                             num_workers=opt.num_workers,
                                             pin_memory=True)
     else:

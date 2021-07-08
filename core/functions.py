@@ -90,14 +90,22 @@ def read_image2np(opt):
     return x
 
 
-def save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs=None):
+def save_networks(path, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs=None):
     if not opt.debug_run:
-        torch.save(Dst + [netDst], '%s/Dst.pth' % (opt.outf))
-        torch.save(Gst + [netGst], '%s/Gst.pth' % (opt.outf))
-        torch.save(Dts + [netDts], '%s/Dts.pth' % (opt.outf))
-        torch.save(Gts + [netGts], '%s/Gts.pth' % (opt.outf))
-        if semseg_cs != None:
-            torch.save(semseg_cs, '%s/semseg_cs.pth' % (opt.outf))
+        if len(opt.gpus) > 1:
+            torch.save(Dst + [netDst], '%s/Dst.pth' % (path))
+            torch.save(Gst + [netGst], '%s/Gst.pth' % (path))
+            torch.save(Dts + [netDts], '%s/Dts.pth' % (path))
+            torch.save(Gts + [netGts], '%s/Gts.pth' % (path))
+            if semseg_cs != None:
+                torch.save(semseg_cs, '%s/semseg_cs.pth' % (path))
+        else:
+            torch.save(Dst + [netDst.module], '%s/Dst.pth' % (path))
+            torch.save(Gst + [netGst.module], '%s/Gst.pth' % (path))
+            torch.save(Dts + [netDts.module], '%s/Dts.pth' % (path))
+            torch.save(Gts + [netGts.module], '%s/Gts.pth' % (path))
+            if semseg_cs != None:
+                torch.save(semseg_cs.module, '%s/semseg_cs.pth' % (path))
 
 def colorize_mask(mask):
     # mask: tensor of the mask
@@ -159,8 +167,6 @@ def GeneratePyramid(image, num_scales, curr_scale, scale_factor, crop_size):
             curr_scale_image = imresize_torch(image, scale)
             scales_pyramid.append(curr_scale_image)
     return scales_pyramid
-
-
 
 def RGBImageToNumpy(im):
     im = np.asarray(im, np.float32)

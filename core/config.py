@@ -108,7 +108,8 @@ class Logger(object):
 def post_config(opt):
         # init fixed parameters
         opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])
-        opt.out_ = 'TrainedModels/%s' % opt.folder_string
+        opt.out_ = '%s/%s' % (opt.checkpoints_dir, opt.folder_string)
+
         try:
             os.makedirs(opt.out_)
         except OSError:
@@ -125,11 +126,6 @@ def post_config(opt):
 
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(opt.gpus)[1:-1].strip(' ').replace(" ", "")
-        if len(opt.gpus) > 1:
-            opt.device = 'cpu' if opt.not_cuda else 'cuda'
-        else:
-            opt.device = 'cuda:%d' % opt.gpus[0]
-
         opt.logger = Logger(os.path.join(opt.out_, 'log.txt'))
         sys.stdout = opt.logger
 
@@ -137,6 +133,7 @@ def post_config(opt):
             opt.manualSeed = random.randint(1, 10000)
         print("Random Seed: ", opt.manualSeed)
         import torch
+        opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
         # torch.set_deterministic(True)
         # torch.backends.cudnn.deterministic = True
         random.seed(opt.manualSeed)

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
 from data.labels_info import trainId2label
-from core.constants import MAX_CHANNELS_PER_LAYER, NUM_CLASSES, IGNORE_LABEL
+from core.constants import MAX_CHANNELS_PER_LAYER, NUM_CLASSES, IGNORE_LABEL, BEST_MIOU
 from core.sync_batchnorm import convert_model
 from semseg_models import CreateSemsegModel
 import numpy as np
@@ -17,6 +17,7 @@ import os
 
 
 def train(opt):
+    opt.best_miou = BEST_MIOU
     if opt.continue_train_from_path != '':
         Gst, Gts, Dst, Dts = load_trained_networks(opt)
         # todo: add loading semseg network
@@ -115,7 +116,6 @@ def train(opt):
 
 def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list,
                        opt, resume=False, epoch_num_to_resume=1, semseg_cs=None):
-        # setup optimizers and schedulers:
         optimizerDst = optim.Adam(netDst.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
         optimizerGst = optim.Adam(netGst.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
         optimizerDts = optim.Adam(netDts.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
@@ -140,11 +140,11 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         keep_training = True
 
         while keep_training:
-            print('scale %d: starting epoch %d...' % (opt.curr_scale, epoch_num))
-            # Set warmup flag:
+            print('scale %d: starting epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.epochs_per_scale))
             opt.warmup = opt.last_scale and epoch_num <= opt.warmup_epochs
             if opt.warmup:
                 print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
+
             for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
                 if steps > total_steps_per_scale:
                     keep_training = False
@@ -288,23 +288,25 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 # Save network checkpoint every 1k steps:
                 if steps > checkpoint_int * 1000:
                     print('scale %d: saving networks after %d steps...' % (opt.curr_scale, steps))
-                    if (len(opt.gpus) > 1):
-                        save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt, semseg_cs.module)
-                    else:
-                        save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
+                    save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
                     checkpoint_int += 1
+
                 steps = np.minimum(generator_steps, discriminator_steps)
+
+            ############################
+            # (5) Validate performance after each epoch if we are at the last scale:
+            ############################
+            if opt.last_scale:
+                iou, miou, cm = calculte_validation_accuracy(semseg_cs, opt.target_validation_loader, epoch_num, opt)
+                export_epoch_accuracy(opt, iou, miou, cm, epoch_num)
+                if miou > opt.best_miou:
+                    opt.best_miou = miou
+                    save_networks(os.path.join(opt.checkpoints_dir, '%.2f_mIoU_model' % (miou)), netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
 
             epoch_num += 1
 
-        # Calculate mIoU on current models:
-
-        if (len(opt.gpus) > 1):
-            save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt, semseg_cs.module)
-            return netDst.module, netGst.module, netDts.module, netGts.module
-        else:
-            save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
-            return netDst, netGst, netDts, netGts
+        save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
+        return (netDst, netGst, netDts, netGts) if len(opt.gpus) == 1 else (netDst.module, netGst.module, netDts.module, netGts.module)
 
 def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales, opt, real_segmap=None):
     # train with real image
@@ -444,39 +446,37 @@ def norm_image(im):
     assert torch.max(out) <= 1 and torch.min(out) >= 0
     return out
 
-def save_epoch_accuracy(tb, set, iou, miou, epoch):
-    if set == 'Validtaion':
-        for i in range(NUM_CLASSES):
-            tb.add_scalar('%sAccuracy/%s class accuracy' % (set, trainId2label[i].name), iou[i], epoch)
-        tb.add_scalar('%sAccuracy/Accuracy History [mIoU]' % set, miou, epoch)
-    elif set == 'Test':
-        print('================Model Acuuracy Summery================')
-        for i in range(NUM_CLASSES):
-            print('%s class accuracy: = %.2f' % (trainId2label[i].name, iou[i]))
-        print('Average accuracy of test set on target domain: mIoU = %2f' % miou)
-        print('======================================================')
+def export_epoch_accuracy(opt, iou, miou, cm, epoch):
+    for i in range(NUM_CLASSES):
+        opt.tb.add_scalar('Semseg/%s class accuracy' % (trainId2label[i].name), iou[i], epoch)
+    opt.tb.add_scalar('Semseg/Accuracy History [mIoU]', miou, epoch)
+    print('================Model Acuuracy Summery================')
+    for i in range(NUM_CLASSES):
+        print('%s class accuracy: = %.2f%%' % (trainId2label[i].name, iou[i]*100))
+    print('Average accuracy of test set on target domain: mIoU = %2f%%' % (miou*100))
+    print('======================================================')
 
 def calculte_validation_accuracy(semseg_net, target_val_loader, epoch_num, opt):
     semseg_net.eval()
     running_metrics_val = runningScore(NUM_CLASSES)
-    rand_samp_ind = np.random.randint(0, len(target_val_loader.dataset), 1)
-    rand_batch = np.floor(rand_samp_ind/opt.batch_size).astype(np.int)
     cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
     for val_batch_num, (target_images, target_labels) in enumerate(target_val_loader):
+        if opt.debug_run and val_batch_num > opt.debug_stop_iteration:
+            break
         target_images = target_images.to(opt.device)
         target_labels = target_labels.to(opt.device)
         with torch.no_grad():
             pred_softs = semseg_net(target_images)
             pred_labels = torch.argmax(pred_softs, dim=1)
             cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
-            running_metrics_val.update(target_labels, pred_labels)
-            if val_batch_num == rand_batch:
+            running_metrics_val.update(target_labels.cpu().numpy(), pred_labels.cpu().numpy())
+            if val_batch_num == 0:
                 t        = norm_image(target_images[0])
                 t_lbl    = colorize_mask(target_labels[0])
                 pred_lbl = colorize_mask(pred_labels[0])
-                opt.tb.add_image('Scale%d/Semseg/Validtaion/target' % opt.curr_scale, t, epoch_num)
-                opt.tb.add_image('Scale%d/Semseg/Validtaion/target_label' % opt.curr_scale, t_lbl, epoch_num)
-                opt.tb.add_image('Scale%d/Semseg/Validtaion/prediction_label' % opt.curr_scale, pred_lbl, epoch_num)
+                opt.tb.add_image('Semseg/Validtaion/target', t, epoch_num)
+                opt.tb.add_image('Semseg/Validtaion/target_label', t_lbl, epoch_num)
+                opt.tb.add_image('Semseg/Validtaion/prediction_label', pred_lbl, epoch_num)
     iou, miou = compute_iou_torch(cm)
 
     # proda's calc:
