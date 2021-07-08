@@ -72,6 +72,11 @@ def train(opt):
                 if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
                     semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
 
+                # Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gst_curr, device_ids=opt.gpus)).to(opt.device)
+                # Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gts_curr, device_ids=opt.gpus)).to(opt.device)
+                # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
+                #     semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
+
                 # Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
                 # Dts_curr, Gts_curr = nn.DataParallel(Dts_curr, device_ids=opt.gpus), nn.DataParallel(Gts_curr, device_ids=opt.gpus)
                 # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
@@ -134,18 +139,17 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
         while keep_training:
             print('scale %d: starting epoch %d...' % (opt.curr_scale, epoch_num))
-            epoch_num += 1
-            # Set conditioned generators' warmup according to current epoch:
-
+            # Set warmup flag:
             opt.warmup = opt.last_scale and epoch_num <= opt.warmup_epochs
-            netGts.warmup = opt.warmup
-
+            if opt.warmup:
+                print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
             for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
                 if steps > total_steps_per_scale:
                     keep_training = False
                     break
-                if opt.debug_run and steps > opt.debug_stop_iteration:
-                    keep_training = False
+                if opt.debug_run and steps > epoch_num*opt.debug_stop_iteration:
+                    if opt.debug_stop_epoch <= epoch_num:
+                        keep_training = False
                     break
 
                 # Move scale and label tensors to CUDA:
@@ -156,7 +160,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                 # Create segmentation maps if needed:
                 source_segmap = one_hot_encoder(source_label) if opt.last_scale else None
-                target_segmap = one_hot_encoder(semseg_cs(source_scales[-1])) if not opt.warmup else None
+                target_segmap = one_hot_encoder(semseg_cs(source_scales[-1]).argmax(1)) if not opt.warmup else None
 
                 # Create pyramid concatenation:
                 with torch.no_grad():
@@ -193,8 +197,6 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     optimizerDts.step()
 
                     discriminator_steps += 1
-
-
 
 
                 ############################
@@ -239,7 +241,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 if opt.last_scale:
                     optimizerSemseg.zero_grad()
                     optimizerGst.zero_grad()
-                    semseg_labels, semseg_loss = semantic_segmentation_loss(source_scales, Gst, semseg_cs, source_label, opt)
+                    semseg_labels, semseg_loss = semantic_segmentation_loss(source_scales, Gst, netGst, semseg_cs, source_label, opt)
                     opt.tb.add_scalar('Scale%d/Semseg/SemsegCsLoss' % opt.curr_scale, semseg_loss.item(), semseg_steps)
                     optimizerSemseg.step()
                     optimizerGst.step()
@@ -285,17 +287,19 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 if steps > checkpoint_int * 1000:
                     print('scale %d: saving networks after %d steps...' % (opt.curr_scale, steps))
                     if (len(opt.gpus) > 1):
-                        save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt)
+                        save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt, semseg_cs.module)
                     else:
-                        save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt)
+                        save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
                     checkpoint_int += 1
                 steps = np.minimum(generator_steps, discriminator_steps)
 
+            epoch_num += 1
+
         if (len(opt.gpus) > 1):
-            save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt)
+            save_networks(netDst.module, netGst.module, netDts.module, netGts.module, Gst, Gts, Dst, Dts, opt, semseg_cs.module)
             return netDst.module, netGst.module, netDts.module, netGts.module
         else:
-            save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt)
+            save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
             return netDst, netGst, netDts, netGts
 
 def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales, opt, real_segmap=None):
@@ -367,8 +371,9 @@ def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
 
     return loss_sts, loss_tst, loss, (sit_image, sitis_image, tis_image, tisit_image)
 
-def semantic_segmentation_loss(input_pyramid, Gs, semseg_net, input_label, opt):
-    converted_image = concat_pyramid(Gs, input_pyramid, opt, input_label)
+def semantic_segmentation_loss(input_pyramid, Gs, currG, semseg_net, input_label, opt):
+    prev_converted_image = concat_pyramid(Gs, input_pyramid, opt, input_label)
+    converted_image = currG(input_pyramid[-1], prev_converted_image, one_hot_encoder(input_label))
     output_softs, semseg_loss = semseg_net(converted_image, input_label)
     semseg_loss = semseg_loss.mean()
     output_label = output_softs.argmax(1)

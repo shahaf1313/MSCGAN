@@ -1,5 +1,4 @@
 import argparse
-import torch
 import datetime
 import random
 import numpy as np
@@ -82,7 +81,8 @@ def get_arguments():
     parser.add_argument('--train_im2im_pyramid', help='Chooses whether to train semseg pyramid or im2im pyramid (defualt is to train semseg).', default=False, action='store_true')
     parser.add_argument("--tb_logs_dir", type=str, required=False, default='./runs', help="Path to Tensorboard logs dir.")
     parser.add_argument('--debug_run', default=False, action='store_true')
-    parser.add_argument('--debug_stop_iteration', type=int, default=15, help='Iteration number to finish training current scale.')
+    parser.add_argument('--debug_stop_iteration', type=int, default=15, help='Iteration number to finish training current scale in debug mode.')
+    parser.add_argument('--debug_stop_epoch', type=int, default=0, help='Epoch number to finish training current scale in debug mode.')
     parser.add_argument("--checkpoints_dir", type=str, required=False, default='./TrainedModels', help="Where to save snapshots of the model.")
     parser.add_argument("--print_rate", type=int, required=False, default=100, help="Print progress to screen every x iterations")
     parser.add_argument("--pics_per_epoch", type=int, required=False, default=10, help="Defines the number of pictures to save each epoch.")
@@ -125,7 +125,10 @@ def post_config(opt):
 
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(opt.gpus)[1:-1].strip(' ').replace(" ", "")
-        opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
+        if len(opt.gpus) > 1:
+            opt.device = 'cpu' if opt.not_cuda else 'cuda'
+        else:
+            opt.device = 'cuda:%d' % opt.gpus[0]
 
         opt.logger = Logger(os.path.join(opt.out_, 'log.txt'))
         sys.stdout = opt.logger
@@ -133,6 +136,7 @@ def post_config(opt):
         if opt.manualSeed is None:
             opt.manualSeed = random.randint(1, 10000)
         print("Random Seed: ", opt.manualSeed)
+        import torch
         # torch.set_deterministic(True)
         # torch.backends.cudnn.deterministic = True
         random.seed(opt.manualSeed)
@@ -141,6 +145,4 @@ def post_config(opt):
         np.random.RandomState(opt.manualSeed)
         np.random.seed(opt.manualSeed)
 
-        if torch.cuda.is_available() and opt.not_cuda:
-            print("WARNING: You have a CUDA device, so you should probably run with --cuda")
         return opt

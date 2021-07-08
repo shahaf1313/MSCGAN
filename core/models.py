@@ -17,7 +17,7 @@ class ConvBlock(nn.Sequential):
 class ConvBlockSpade(nn.Module):
     def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, activation='lrelu'):
         super(ConvBlockSpade, self).__init__()
-        self._warmup = True
+        # self._warmup = True
         self.spade = SPADE(norm_type, ker_size, in_channel, label_nc=NUM_CLASSES+1) #+1 for don't care label
         self.bn = nn.BatchNorm2d(in_channel)
         self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
@@ -33,19 +33,19 @@ class ConvBlockSpade(nn.Module):
             z = self.conv(self.actvn(self.spade(x, seg_map)))
         return z
 
-    @property
-    def warmup(self):
-        return self._warmup
-
-    @warmup.setter
-    def warmup(self, val):
-        self._warmup = val
+    # @property
+    # def warmup(self):
+    #     return self._warmup
+    #
+    # @warmup.setter
+    # def warmup(self, val):
+    #     self._warmup = val
 
 class LabelConditionedGenerator(nn.Module):
     def __init__(self, opt):
         super(LabelConditionedGenerator, self).__init__()
         self.is_initial_scale = opt.curr_scale == 0
-        self._warmup = True
+        # self._warmup = True
         alpha = 1 if self.is_initial_scale else 0
         # self.head = nn.Sequential(OrderedDict([('head_block',ConvBlockSpade((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type))]))
         self.head = ConvBlockSpade((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
@@ -74,16 +74,16 @@ class LabelConditionedGenerator(nn.Module):
         z = self.tail_actvn(z)
         return z
 
-    @property
-    def warmup(self):
-        return self._warmup
-
-    @warmup.setter
-    def warmup(self, val):
-        self.head.warmup = val
-        for block in self.body:
-            block.warmup = val
-        self.tail.warmup = val
+    # @property
+    # def warmup(self):
+    #     return self._warmup
+    #
+    # @warmup.setter
+    # def warmup(self, val):
+    #     self.head.warmup = val
+    #     for block in self.body:
+    #         block.warmup = val
+    #     self.tail.warmup = val
 
 class ConvGenerator(nn.Module):
     def __init__(self, opt):

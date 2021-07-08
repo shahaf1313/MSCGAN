@@ -90,12 +90,14 @@ def read_image2np(opt):
     return x
 
 
-def save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt):
+def save_networks(netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs=None):
     if not opt.debug_run:
         torch.save(Dst + [netDst], '%s/Dst.pth' % (opt.outf))
         torch.save(Gst + [netGst], '%s/Gst.pth' % (opt.outf))
         torch.save(Dts + [netDts], '%s/Dts.pth' % (opt.outf))
         torch.save(Gts + [netGts], '%s/Gts.pth' % (opt.outf))
+        if semseg_cs != None:
+            torch.save(semseg_cs, '%s/semseg_cs.pth' % (opt.outf))
 
 def colorize_mask(mask):
     # mask: tensor of the mask

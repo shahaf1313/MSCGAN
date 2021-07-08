@@ -1,17 +1,4 @@
-from core.constants import IMG_CROP_SIZE_IM2IM, IMG_CROP_SIZE_SEMSEG
-from data import CreateSrcDataLoader
-from data import CreateTrgDataLoader
-from data import CreateIm2ImDataLoader
-from core.config import get_arguments, post_config
-from core.training import train
-import numpy as np
-
-
-def main():
-    parser = get_arguments()
-    opt = parser.parse_args()
-    opt = post_config(opt)
-
+def main(opt):
     if opt.train_im2im_pyramid:
         opt.image_full_size = IMG_CROP_SIZE_IM2IM
         opt.source_loaders, opt.target_loaders = im2im_train(opt)
@@ -60,5 +47,15 @@ def im2im_train(opt):
     return domain_a_dataloaders, domain_b_dataloaders
 
 if __name__ == '__main__':
-    main()
+    from core.config import get_arguments, post_config
+    parser = get_arguments()
+    opt = parser.parse_args()
+    opt = post_config(opt)
+    from core.constants import IMG_CROP_SIZE_IM2IM, IMG_CROP_SIZE_SEMSEG
+    from data import CreateSrcDataLoader
+    from data import CreateTrgDataLoader
+    from data import CreateIm2ImDataLoader
+    from core.training import train
+    import numpy as np
+    main(opt)
 
