@@ -5,6 +5,7 @@ import math
 from skimage import io as img
 from skimage import color
 from PIL import Image
+import os
 from core.constants import palette, NUM_CLASSES, IGNORE_LABEL
 
 
@@ -43,8 +44,7 @@ def calc_gradient_penalty(netD, real_data, fake_data, LAMBDA, device):
     alpha = alpha.to(device)
 
     interpolates = alpha * real_data + ((1 - alpha) * fake_data)
-
-    interpolates = interpolates.to(device)
+    interpolates = interpolates
     interpolates = torch.autograd.Variable(interpolates, requires_grad=True)
 
     disc_interpolates = netD(interpolates)
@@ -92,6 +92,10 @@ def read_image2np(opt):
 
 def save_networks(path, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs=None):
     if not opt.debug_run:
+        try:
+            os.makedirs(path)
+        except OSError:
+            pass
         if len(opt.gpus) > 1:
             torch.save(Dst + [netDst], '%s/Dst.pth' % (path))
             torch.save(Gst + [netGst], '%s/Gst.pth' % (path))

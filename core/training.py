@@ -126,8 +126,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             optimizerSemseg = None
 
         batch_size = opt.source_loaders[opt.curr_scale].batch_size
-        opt.save_pics_rate = int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size / opt.pics_per_epoch)
-        total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size)
+        opt.save_pics_rate = int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size / opt.pics_per_epoch)
+        total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size)
         start = time.time()
         discriminator_steps = 0
         generator_steps = 0
@@ -141,8 +141,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
         while keep_training:
             print('scale %d: starting epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.epochs_per_scale))
-            opt.warmup = opt.last_scale and epoch_num <= opt.warmup_epochs
-            if opt.warmup:
+            opt.warmup = epoch_num <= opt.warmup_epochs
+            if opt.last_scale and opt.warmup:
                 print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
 
             for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
@@ -154,13 +154,20 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                         keep_training = False
                     break
 
+                netDst.train()
+                netGst.train()
+                netDts.train()
+                netGts.train()
+                if opt.last_scale:
+                    semseg_cs.train()
+
                 # Move scale and label tensors to CUDA:
                 source_label = source_label.to(opt.device)
                 for i in range(len(source_scales)):
                     source_scales[i] = source_scales[i].to(opt.device)
                     target_scales[i] = target_scales[i].to(opt.device)
 
-                # Resize scale and label tensorsif needed:
+                # Resize scale and label tensors if needed:
                 if opt.use_half_image_size:
                     source_label = (nn.functional.interpolate(source_label.unsqueeze(1), scale_factor=[0.5,0.5], mode='nearest')).squeeze()
                     for i in range(len(source_scales)):
@@ -168,42 +175,43 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                         target_scales[i] = torch.clamp(nn.functional.interpolate(target_scales[i], scale_factor=[0.5,0.5], mode='bicubic'), -1, 1)
 
                 # Create segmentation maps if needed:
-                source_segmap = one_hot_encoder(source_label) if not opt.warmup else None
-                target_segmap = one_hot_encoder(semseg_cs(source_scales[-1]).argmax(1)) if not opt.warmup else None
+                source_segmap = one_hot_encoder(source_label) if opt.last_scale and not opt.warmup else None
 
-                # Create pyramid concatenation:
-                with torch.no_grad():
-                    prev_sit = concat_pyramid(Gst, source_scales, opt, source_segmap)
-                    prev_tis = concat_pyramid(Gts, target_scales, opt, target_segmap)
-
+                # # Create pyramid concatenation:
+                # with torch.no_grad():
+                #     prev_sit = concat_pyramid(Gst, source_scales, opt, source_segmap)
+                #     prev_tis = concat_pyramid(Gts, target_scales, opt, target_segmap)
 
 
-            # todo: finidhed code re-design till this point. Continue from here:
                 ############################
                 # (1) Update D networks: maximize D(x) + D(G(z))
                 ###########################
                 cyc_images, semseg_labels = None, None
                 for j in range(opt.Dsteps):
                     #train discriminator networks between domains (S->T, T->S)
-                    # (netD, netG, prev, real_images, from_scales, opt)
                     optimizerDst.zero_grad()
                     optimizerDts.zero_grad()
+                    if opt.last_scale and not opt.warmup:
+                        optimizerSemseg.zero_grad()
 
                     #S -> T:
-                    D_x, D_G_z, errD = adversarial_disciriminative_train(netDst, netGst, prev_sit, target_scales[opt.curr_scale], source_scales, opt, real_segmap=source_segmap)
+                    D_x, D_G_z, errD = adversarial_disciriminative_train(netDst, netGst, Gst, target_scales[opt.curr_scale], source_scales, opt, real_segmap=source_segmap)
                     opt.tb.add_scalar('Scale%d/ST/DiscriminatorLoss' % opt.curr_scale, errD.item()/opt.lambda_adversarial, discriminator_steps)
                     opt.tb.add_scalar('Scale%d/ST/DiscriminatorRealImagesLoss' % opt.curr_scale, D_x/opt.lambda_adversarial, discriminator_steps)
                     opt.tb.add_scalar('Scale%d/ST/DiscriminatorFakeImagesLoss' % opt.curr_scale, D_G_z/opt.lambda_adversarial, discriminator_steps)
 
 
                     # T -> S:
-                    D_x, D_G_z, errD = adversarial_disciriminative_train(netDts, netGts, prev_tis, source_scales[opt.curr_scale], target_scales, opt, real_segmap=target_segmap)
+                    target_segmap = one_hot_encoder(semseg_cs(source_scales[-1]).argmax(1)) if opt.last_scale and not opt.warmup else None
+                    D_x, D_G_z, errD = adversarial_disciriminative_train(netDts, netGts, Gts, source_scales[opt.curr_scale], target_scales, opt, real_segmap=target_segmap)
                     opt.tb.add_scalar('Scale%d/TS/DiscriminatorLoss' % opt.curr_scale, errD.item()/opt.lambda_adversarial, discriminator_steps)
                     opt.tb.add_scalar('Scale%d/TS/DiscriminatorRealImagesLoss' % opt.curr_scale, D_x/opt.lambda_adversarial, discriminator_steps)
                     opt.tb.add_scalar('Scale%d/TS/DiscriminatorFakeImagesLoss' % opt.curr_scale, D_G_z/opt.lambda_adversarial, discriminator_steps)
 
                     optimizerDst.step()
                     optimizerDts.step()
+                    if opt.last_scale and not opt.warmup:
+                        optimizerSemseg.step()
 
                     discriminator_steps += 1
 
@@ -216,13 +224,16 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     # train generator networks between domains (S->T, T->S)
                     optimizerGst.zero_grad()
                     optimizerGts.zero_grad()
+                    if opt.last_scale and not opt.warmup:
+                        optimizerSemseg.zero_grad()
 
                     # S -> T:
-                    errG = adversarial_generative_train(netGst, netDst, prev_sit, source_scales, opt, real_segmap=source_segmap)
+                    errG = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_segmap=source_segmap)
                     opt.tb.add_scalar('Scale%d/ST/GeneratorAdversarialLoss' % opt.curr_scale, errG.item()/opt.lambda_adversarial, generator_steps)
 
                     # T -> S:
-                    errG = adversarial_generative_train(netGts, netDts, prev_tis, target_scales, opt, real_segmap=target_segmap)
+                    target_segmap = one_hot_encoder(semseg_cs(source_scales[-1]).argmax(1)) if opt.last_scale and not opt.warmup else None
+                    errG = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt, real_segmap=target_segmap)
                     opt.tb.add_scalar('Scale%d/TS/GeneratorAdversarialLoss' % opt.curr_scale, errG.item()/opt.lambda_adversarial, generator_steps)
 
                     if opt.cyclic_loss_calc_rate > 0 and generator_steps % opt.cyclic_loss_calc_rate == 0:
@@ -230,15 +241,17 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                         # (netGx, x, x_scales, prev_x,
                         #  netGy, y, y_scales, prev_y,
                         #  m_noise, opt)
-                        cyc_loss_x, cyc_loss_y, cyc_loss, cyc_images = cycle_consistency_loss(source_scales[-1], prev_sit, netGst, Gst,
-                                                                                              target_scales[-1], prev_tis, netGts, Gts, opt,
-                                                                                              source_segmap, target_segmap)
+                        cyc_loss_x, cyc_loss_y, cyc_loss, cyc_images = cycle_consistency_loss(source_scales, netGst, Gst,
+                                                                                              target_scales, netGts, Gts, opt,
+                                                                                              source_segmap, semseg_cs)
                         opt.tb.add_scalar('Scale%d/Cyclic/LossSTS' % opt.curr_scale, cyc_loss_x.item()/opt.lambda_cyclic, int(generator_steps/opt.cyclic_loss_calc_rate))
                         opt.tb.add_scalar('Scale%d/Cyclic/LossTST' % opt.curr_scale, cyc_loss_y.item()/opt.lambda_cyclic, int(generator_steps/opt.cyclic_loss_calc_rate))
                         opt.tb.add_scalar('Scale%d/Cyclic/Loss' % opt.curr_scale, cyc_loss.item()/opt.lambda_cyclic, int(generator_steps/opt.cyclic_loss_calc_rate))
 
                     optimizerGst.step()
                     optimizerGts.step()
+                    if opt.last_scale and not opt.warmup:
+                        optimizerSemseg.step()
 
                     generator_steps += 1
 
@@ -267,9 +280,9 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     s     = norm_image(source_scales[opt.curr_scale][0])
                     t     = norm_image(target_scales[opt.curr_scale][0])
                     if cyc_images is None:
-                        _, _, _, cyc_images = cycle_consistency_loss(source_scales[-1], prev_sit, netGst, Gst,
-                                                                     target_scales[-1], prev_tis, netGts, Gts, opt,
-                                                                     source_segmap, target_segmap)
+                        _, _, _, cyc_images = cycle_consistency_loss(source_scales, netGst, Gst,
+                                                                     target_scales, netGts, Gts, opt,
+                                                                     source_segmap, semseg_cs)
                     sit   = norm_image(cyc_images[0][0])
                     sitis = norm_image(cyc_images[1][0])
                     tis   = norm_image(cyc_images[2][0])
@@ -287,6 +300,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                         opt.tb.add_image('Scale%d/source_in_target_label' % opt.curr_scale, sit_label, save_pics_int*opt.save_pics_rate)
                         opt.tb.add_image('Scale%d/source_label' % opt.curr_scale, s_label, save_pics_int*opt.save_pics_rate)
                         if not opt.warmup:
+                            target_segmap = one_hot_encoder(semseg_cs(source_scales[-1]).argmax(1))
                             t_label = colorize_mask(target_segmap.argmax(1)[0])
                             opt.tb.add_image('Scale%d/target_label' % opt.curr_scale, t_label, save_pics_int*opt.save_pics_rate)
 
@@ -315,24 +329,25 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
         return (netDst, netGst, netDts, netGts) if len(opt.gpus) == 1 else (netDst.module, netGst.module, netDts.module, netGts.module)
 
-def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales, opt, real_segmap=None):
+def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, opt, real_segmap=None):
     # train with real image
-    output = netD(real_images).to(opt.device)
-    # output = netD(real_images)
+    # output = netD(real_images).to(opt.device)
+    output = netD(real_images)
     errD_real = -1 * opt.lambda_adversarial * output.mean()
     errD_real.backward(retain_graph=True)
     D_x = errD_real.item()
 
     # train with fake
-    curr = from_scales[opt.curr_scale]
     with torch.no_grad():
+        curr = from_scales[opt.curr_scale]
+        prev = concat_pyramid(Gs, from_scales, opt, real_segmap)
         fake_images = netG(curr, prev, real_segmap)
     output = netD(fake_images.detach())
-    errD_fake =  opt.lambda_adversarial * output.mean()
+    errD_fake = opt.lambda_adversarial * output.mean()
     errD_fake.backward(retain_graph=True)
     D_G_z = errD_fake.item()
 
-    gradient_penalty =  opt.lambda_adversarial * calc_gradient_penalty(netD, real_images, fake_images, opt.lambda_grad, opt.device)
+    gradient_penalty = opt.lambda_adversarial * calc_gradient_penalty(netD, real_images, fake_images, opt.lambda_grad, opt.device)
     gradient_penalty.backward()
 
     errD = errD_real + errD_fake + gradient_penalty
@@ -340,26 +355,28 @@ def adversarial_disciriminative_train(netD, netG, prev, real_images, from_scales
     return D_x, D_G_z, errD
 
 
-def adversarial_generative_train(netG, netD, prev, from_scales, opt, real_segmap=None):
+def adversarial_generative_train(netG, netD, Gs, from_scales, opt, real_segmap=None):
 
-    ##todo: I added!
     # train with fake
     curr = from_scales[opt.curr_scale]
+    prev = concat_pyramid(Gs, from_scales, opt, real_segmap)
     fake = netG(curr, prev, real_segmap)
-    ##end
-
     output = netD(fake)
     errG = -1 * opt.lambda_adversarial * output.mean()
     errG.backward()
     return errG
 
-def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
-                           target_batch, prev_tis, currGts, Gts_pyramid, opt,
-                           segmap_source=None, segmap_target=None):
+def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
+                           target_scales, currGts, Gts_pyramid, opt,
+                           segmap_source=None, semseg_net=None):
     criterion_sts = nn.L1Loss()
     criterion_tst = nn.L1Loss()
+    source_batch  = source_scales[-1]
+    target_batch =  target_scales[-1]
 
     #source in target:
+    with torch.no_grad():
+        prev_sit = concat_pyramid(Gst_pyramid, source_scales, opt, segmap_source)
     sit_image = currGst(source_batch, prev_sit, segmap_source)
     with torch.no_grad():
         generated_pyramid_sit = GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
@@ -370,12 +387,15 @@ def cycle_consistency_loss(source_batch, prev_sit, currGst, Gst_pyramid,
     loss_sts.backward()
 
 
-    #source in target:
+    #traget in source:
+    segmap_target = one_hot_encoder(semseg_net(target_batch).argmax(1)) if opt.last_scale and not opt.warmup else None
+    with torch.no_grad():
+        prev_tis = concat_pyramid(Gts_pyramid, target_scales, opt, segmap_target)
     tis_image = currGts(target_batch, prev_tis, segmap_target)
     with torch.no_grad():
         generated_pyramid_tis = GeneratePyramid(tis_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
         prev_tis_generated = concat_pyramid(Gst_pyramid, generated_pyramid_tis, opt, segmap_target)
-    #source in target in source:
+    #target in source in target:
     tisit_image = currGst(tis_image, prev_tis_generated, segmap_target)
     loss_tst = opt.lambda_cyclic * criterion_tst(tisit_image, target_batch)
     loss_tst.backward()
@@ -398,14 +418,12 @@ def concat_pyramid(Gs, sources, opt, labels=None):
         return torch.zeros_like(sources[0])
 
     G_z = sources[0]
-    count = 0
     for G, source_curr, source_next in zip(Gs, sources, sources[1:]):
         G_z = G_z[:, :, 0:source_curr.shape[2], 0:source_curr.shape[3]]
         G_z = G(source_curr, G_z.detach(), labels)
         # G_z = imresize(G_z, 1 / opt.scale_factor, opt)
         G_z = imresize_torch(G_z, 1 / opt.scale_factor)
         G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
-        count += 1
     return G_z
 
 def init_models(opt):
@@ -420,6 +438,7 @@ def init_models(opt):
             print('Generating 2 layers UNET model')
             netG = models.UNetGeneratorTwoLayers(opt).to(opt.device)
     else: #Conditial Generator(!):
+        # netG = models.LabelConditionedGenerator(opt).to(opt.device)
         if opt.curr_scale == opt.num_scales: # last scale, initialize label conditioning:
             netG = models.LabelConditionedGenerator(opt).to(opt.device)
         else: # not last scale, use regular generator:
@@ -465,36 +484,37 @@ def export_epoch_accuracy(opt, iou, miou, cm, epoch):
 
 def calculte_validation_accuracy(semseg_net, target_val_loader, epoch_num, opt):
     semseg_net.eval()
-    running_metrics_val = runningScore(NUM_CLASSES)
-    cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
-    for val_batch_num, (target_images, target_labels) in enumerate(target_val_loader):
-        if opt.debug_run and val_batch_num > opt.debug_stop_iteration:
-            break
-        target_images = target_images.to(opt.device)
-        target_labels = target_labels.to(opt.device)
-        with torch.no_grad():
-            pred_softs = semseg_net(target_images)
-            pred_labels = torch.argmax(pred_softs, dim=1)
-            cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
-            running_metrics_val.update(target_labels.cpu().numpy(), pred_labels.cpu().numpy())
-            if val_batch_num == 0:
-                t        = norm_image(target_images[0])
-                t_lbl    = colorize_mask(target_labels[0])
-                pred_lbl = colorize_mask(pred_labels[0])
-                opt.tb.add_image('Semseg/Validtaion/target', t, epoch_num)
-                opt.tb.add_image('Semseg/Validtaion/target_label', t_lbl, epoch_num)
-                opt.tb.add_image('Semseg/Validtaion/prediction_label', pred_lbl, epoch_num)
-    iou, miou = compute_iou_torch(cm)
+    with torch.no_grad():
+        running_metrics_val = runningScore(NUM_CLASSES)
+        cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
+        for val_batch_num, (target_images, target_labels) in enumerate(target_val_loader):
+            if opt.debug_run and val_batch_num > opt.debug_stop_iteration:
+                break
+            target_images = target_images.to(opt.device)
+            target_labels = target_labels.to(opt.device)
+            with torch.no_grad():
+                pred_softs = semseg_net(target_images)
+                pred_labels = torch.argmax(pred_softs, dim=1)
+                cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
+                running_metrics_val.update(target_labels.cpu().numpy(), pred_labels.cpu().numpy())
+                if val_batch_num == 0:
+                    t        = norm_image(target_images[0])
+                    t_lbl    = colorize_mask(target_labels[0])
+                    pred_lbl = colorize_mask(pred_labels[0])
+                    opt.tb.add_image('Semseg/Validtaion/target', t, epoch_num)
+                    opt.tb.add_image('Semseg/Validtaion/target_label', t_lbl, epoch_num)
+                    opt.tb.add_image('Semseg/Validtaion/prediction_label', pred_lbl, epoch_num)
+        iou, miou = compute_iou_torch(cm)
 
-    # proda's calc:
-    score, class_iou = running_metrics_val.get_scores()
-    for k, v in score.items():
-        print(k, v)
+        # proda's calc:
+        score, class_iou = running_metrics_val.get_scores()
+        for k, v in score.items():
+            print(k, v)
 
-    for k, v in class_iou.items():
-        print(k, v)
+        for k, v in class_iou.items():
+            print(k, v)
 
-    running_metrics_val.reset()
+        running_metrics_val.reset()
     return iou, miou, cm
 
 

@@ -18,9 +18,9 @@ class ConvBlockSpade(nn.Module):
     def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, activation='lrelu'):
         super(ConvBlockSpade, self).__init__()
         # self._warmup = True
-        self.spade = SPADE(norm_type, ker_size, in_channel, label_nc=NUM_CLASSES+1) #+1 for don't care label
-        self.bn = nn.BatchNorm2d(in_channel)
         self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
+        self.spade = SPADE(norm_type, ker_size, out_channel, label_nc=NUM_CLASSES+1) #+1 for don't care label
+        self.bn = nn.BatchNorm2d(out_channel)
         if activation=='lrelu':
             self.actvn = nn.LeakyReLU(0.2)
         elif activation=='tanh':
@@ -28,9 +28,9 @@ class ConvBlockSpade(nn.Module):
 
     def forward(self, x, seg_map=None):
         if seg_map==None:
-            z = self.conv(self.actvn(self.bn(x)))
+            z = self.actvn(self.bn(self.conv(x)))
         else:
-            z = self.conv(self.actvn(self.spade(x, seg_map)))
+            z = self.actvn(self.spade(self.conv(x), seg_map))
         return z
 
     # @property
@@ -56,8 +56,7 @@ class LabelConditionedGenerator(nn.Module):
         # for i in range(opt.num_layer-2):
         #     block = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
         #     self.body.append(block)
-        self.tail = ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
-        self.tail_actvn = nn.Tanh()
+        self.tail = ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type, activation='tanh')
     def forward(self, curr_scale, prev_scale, seg_map=None):
         if self.is_initial_scale:
             z = curr_scale
@@ -71,7 +70,6 @@ class LabelConditionedGenerator(nn.Module):
         z = self.body_2(z, seg_map)
         z = self.body_3(z, seg_map)
         z = self.tail(z, seg_map)
-        z = self.tail_actvn(z)
         return z
 
     # @property
@@ -100,7 +98,7 @@ class ConvGenerator(nn.Module):
             nn.BatchNorm2d(opt.nc_im), #todo: I added, see what is happening
             nn.Tanh()
         )
-    def forward(self, curr_scale, prev_scale):
+    def forward(self, curr_scale, prev_scale, label=None):
         if self.is_initial_scale:
             z = curr_scale
         else:
