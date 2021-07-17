@@ -178,10 +178,28 @@ def RGBImageToNumpy(im):
     im = (im - 128.) / 128  # change from 0..255 to -1..1
     return im
 
-def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
+def encode_semseg_out(input, threshold):
+    softmax_input = nn.functional.softmax(input, dim=1)
+    non_ignore_classes = (softmax_input == softmax_input.max(dim=1, keepdim=True)[0]) * input
+    max_soft_values = softmax_input.max(dim=1)[0]
+    ignore_class = torch.zeros_like(max_soft_values)
+    ignore_class[max_soft_values < threshold] = 1
+    non_ignore_classes[softmax_input < threshold] = 0
+    return torch.cat((non_ignore_classes, ignore_class.unsqueeze(1)), dim=1)
+
+def one_hot_encoder(input, per_class_encode=True, generated_label=False, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
     z = input.clone()
-    z[z==ignore_label] = num_classes
-    output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
+    if generated_label: # Add ignore mask using given threshold:
+        z = z.argmax(1)
+    else: # Add ignore mask using ignore label:
+        z[z==ignore_label] = num_classes
+
+    if per_class_encode:
+        # todo: insert soft labels (from input) per each class instead of one hot encoder when encoding from softs!
+        output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
+    else:
+        z[z==num_classes] = IGNORE_LABEL
+        output = z
     return output
 
 class runningScore(object):
