@@ -141,7 +141,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     generator_steps = 0
     semseg_steps = 0
     epoch_num = epoch_num_to_resume if resume else 1
-    steps = (epoch_num_to_resume - 1) * int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size) if resume else 0
+    steps = (epoch_num_to_resume - 1) * int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size) if resume and not opt.debug_run else 0
     checkpoint_int = 1
     print_int = 0 if not resume else int(steps / opt.print_rate)
     save_pics_int = 0
