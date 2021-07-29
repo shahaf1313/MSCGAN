@@ -17,14 +17,14 @@ def main(opt):
 def segmentation_train(opt):
     opt.batch_size = 1
     opt.curr_scale = 0
-    source_loader, target_loader = CreateSrcDataLoader(opt, get_image_label_pyramid=True), CreateTrgDataLoader(opt, get_scales_pyramid=True)
+    source_loader, target_loader = CreateSrcDataLoader(opt), CreateTrgDataLoader(opt)
     opt.epoch_size = np.maximum(len(target_loader.dataset), len(source_loader.dataset))
 
     source_loaders, target_loaders, num_epochs =[], [], []
     for i in range(opt.num_scales+1):
         opt.batch_size = opt.batch_size_list[i]
         opt.curr_scale = i
-        source_loader, target_loader = CreateSrcDataLoader(opt, get_image_label_pyramid=True), CreateTrgDataLoader(opt, get_scales_pyramid=True)
+        source_loader, target_loader = CreateSrcDataLoader(opt, get_image_label=True), CreateTrgDataLoader(opt, get_scales_pyramid=True)
         source_loader.dataset.SetEpochSize(opt.epoch_size)
         target_loader.dataset.SetEpochSize(opt.epoch_size)
         source_loaders.append(source_loader)

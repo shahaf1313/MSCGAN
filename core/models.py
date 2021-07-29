@@ -6,12 +6,6 @@ from core.constants import NUM_CLASSES
 class ConvBlock(nn.Sequential):
     def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type):
         super(ConvBlock,self).__init__()
-        # self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd))
-        # if norm_type == 'batch_norm':
-        #     self.add_module('norm',nn.BatchNorm2d(out_channel))
-        # elif norm_type == 'instance_norm':
-        #     self.add_module('norm',nn.InstanceNorm2d(out_channel,affine=True))
-        # self.add_module('LeakyRelu',nn.LeakyReLU(0.2, inplace=True))
         if norm_type == 'batch_norm':
             self.add_module('norm',nn.BatchNorm2d(in_channel))
         elif norm_type == 'instance_norm':
@@ -20,45 +14,36 @@ class ConvBlock(nn.Sequential):
         self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd))
 
 class ConvBlockSpade(nn.Module):
-    def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, dont_normalize_spade, activation='lrelu'):
+    def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, activation='lrelu'):
         super(ConvBlockSpade, self).__init__()
-        # self._warmup = True
-        self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
-        # self.spade = SPADE(norm_type, ker_size, out_channel, label_nc=NUM_CLASSES+1, dont_normalize_spade=dont_normalize_spade) #+1 for don't care label
-        self.spade = SPADE(norm_type, ker_size, in_channel, label_nc=NUM_CLASSES+1, dont_normalize_spade=dont_normalize_spade) #+1 for don't care label
-        # self.bn = nn.BatchNorm2d(out_channel)
+        # Normalization:
         self.bn = nn.BatchNorm2d(in_channel)
+        self.spade = SPADE(norm_type, ker_size, in_channel, label_nc=NUM_CLASSES+1) #+1 for don't care label
+        # Activation:
         if activation=='lrelu':
             self.actvn = nn.LeakyReLU(0.2)
         elif activation=='tanh':
             self.actvn = nn.Tanh()
+        # Convolution:
+        self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
 
     def forward(self, x, seg_map=None):
-        if seg_map==None:
-            # z = self.actvn(self.bn(self.conv(x)))
-            z = self.conv(self.actvn(self.bn(x)))
-        else:
-            # z = self.actvn(self.spade(self.conv(x), seg_map))
-            z = self.conv(self.actvn(self.spade(x, seg_map)))
-        return z
+            if seg_map==None:
+                z = self.conv(self.actvn(self.bn(x)))
+            else:
+                z = self.conv(self.actvn(self.spade(x, seg_map)))
+            return z
 
 
 class LabelConditionedGenerator(nn.Module):
     def __init__(self, opt):
         super(LabelConditionedGenerator, self).__init__()
         self.is_initial_scale = opt.curr_scale == 0
-        # self._warmup = True
-        alpha = 1 if self.is_initial_scale else 0
-        # self.head = nn.Sequential(OrderedDict([('head_block',ConvBlockSpade((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type))]))
-        self.head = ConvBlockSpade((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-        self.body_1 = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-        self.body_2 = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-        self.body_3 = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-
-        # for i in range(opt.num_layer-2):
-        #     block = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
-        #     self.body.append(block)
-        self.tail = ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
+        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
         self.tail_actvn = nn.Tanh()
     def forward(self, curr_scale, prev_scale, seg_map=None):
         if self.is_initial_scale:
@@ -67,8 +52,6 @@ class LabelConditionedGenerator(nn.Module):
             z = torch.cat((curr_scale, prev_scale), 1)
 
         z = self.head(z, seg_map)
-        # for block in self.body:
-        #     z = block(z, seg_map)
         z = self.body_1(z, seg_map)
         z = self.body_2(z, seg_map)
         z = self.body_3(z, seg_map)
@@ -104,10 +87,9 @@ class ConvGenerator(nn.Module):
         return z
 
 class WDiscriminator(nn.Module):
-    def __init__(self, opt, use_label=False):
+    def __init__(self, opt):
         super(WDiscriminator, self).__init__()
-        self.use_label = use_label
-        self.head = ConvBlock(use_label*(NUM_CLASSES+1)+opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
         self.body = nn.Sequential()
         for i in range(opt.num_layer-2):
             block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
@@ -116,9 +98,7 @@ class WDiscriminator(nn.Module):
                                   nn.BatchNorm2d(1), #todo: I added, see what is happening
                                   nn.LeakyReLU(0.2))
 
-    def forward(self, x, segmap=None):
-        if segmap!=None and self.use_label:
-            x = torch.cat((x, segmap),dim=1)
+    def forward(self, x):
         x = self.head(x)
         x = self.body(x)
         x = self.tail(x)
@@ -472,9 +452,8 @@ class LabelConditionedGeneratorV2(nn.Module):
 # |norm_nc|: the #channels of the normalized activations, hence the output dim of SPADE
 # |label_nc|: the #channels of the input semantic map, hence the input dim of SPADE
 class SPADE(nn.Module):
-    def __init__(self, param_free_norm_type, kernel_size, norm_nc, label_nc, dont_normalize_spade):
+    def __init__(self, param_free_norm_type, kernel_size, norm_nc, label_nc):
         super().__init__()
-        self.normalize = not dont_normalize_spade
         if param_free_norm_type == 'instance_norm':
             self.param_free_norm = nn.InstanceNorm2d(norm_nc, affine=False)
         elif param_free_norm_type == 'batch_norm':
@@ -498,10 +477,7 @@ class SPADE(nn.Module):
     def forward(self, x, segmap):
 
         # Part 1. generate parameter-free normalized activations
-        if self.normalize:
-            normalized = self.param_free_norm(x)
-        else:
-            normalized = x
+        normalized = self.param_free_norm(x)
 
         # Part 2. produce scaling and bias conditioned on semantic map
         segmap = nn.functional.interpolate(segmap, size=x.size()[2:], mode='nearest')

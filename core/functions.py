@@ -41,7 +41,7 @@ def imresize_torch(image_batch, scale, mode):
     else:
         return nn.functional.interpolate(image_batch, size=(new_size[0], new_size[1]), mode=mode)
 
-def calc_gradient_penalty(netD, real_data, fake_data, segmap, LAMBDA, device):
+def calc_gradient_penalty(netD, real_data, fake_data, LAMBDA, device):
     alpha = torch.rand(1, 1)
     alpha = alpha.expand(real_data.size())
     alpha = alpha.to(device)
@@ -50,7 +50,7 @@ def calc_gradient_penalty(netD, real_data, fake_data, segmap, LAMBDA, device):
     interpolates = interpolates
     interpolates = torch.autograd.Variable(interpolates, requires_grad=True)
 
-    disc_interpolates = netD(interpolates, segmap)
+    disc_interpolates = netD(interpolates)
 
     gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
                                     grad_outputs=torch.ones(disc_interpolates.size()).to(device),
@@ -207,19 +207,10 @@ def strongly_trusted_labels(input, threshold, ignore_label=IGNORE_LABEL):
     strong_labels[softmax_max_values == 0.] = ignore_label
     return strong_labels
 
-def one_hot_encoder(input, per_class_encode=True, generated_label=False, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
+def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
     z = input.clone()
-    if generated_label: # Add ignore mask using given threshold:
-        z = z.argmax(1)
-    else: # Add ignore mask using ignore label:
-        z[z==ignore_label] = num_classes
-
-    if per_class_encode:
-        # todo: insert soft labels (from input) per each class instead of one hot encoder when encoding from softs!
-        output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
-    else:
-        z[z==num_classes] = IGNORE_LABEL
-        output = z
+    z[z==ignore_label] = num_classes
+    output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
     return output
 
 class runningScore(object):

@@ -57,8 +57,8 @@ def train(opt):
             Dst_curr, Gst_curr = curr_nets[0], curr_nets[1]
             Dts_curr, Gts_curr = curr_nets[2], curr_nets[3]
         else:
-            Dst_curr, Gst_curr = init_models(opt, use_label_in_discriminator=opt.use_labels_discriminator)
-            Dts_curr, Gts_curr = init_models(opt, use_label_in_discriminator=False)
+            Dst_curr, Gst_curr = init_models(opt)
+            Dts_curr, Gts_curr = init_models(opt)
             if opt.last_scale:  # Last scale, add semseg network:
                 semseg_cs, _ = CreateSemsegModel(opt)
             else:
@@ -128,7 +128,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     if opt.last_scale:
         optimizerSemseg = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
                                     weight_decay=opt.weight_decay)
-        optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 2,
+        optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
     else:
         optimizerSemseg = None
@@ -153,7 +153,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         if opt.last_scale and opt.warmup:
             print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
 
-        for batch_num, ((source_scales, source_labels), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
+        for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
             if steps > total_steps_per_scale:
                 keep_training = False
                 break
@@ -170,32 +170,24 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 semseg_cs.train()
 
             # Move scale and label tensors to CUDA:
-            # source_labels = source_labels.to(opt.device)
+            source_label = source_label.to(opt.device)
             for i in range(len(source_scales)):
                 source_scales[i] = source_scales[i].to(opt.device)
-                source_labels[i] = source_labels[i].to(opt.device)
                 target_scales[i] = target_scales[i].to(opt.device)
 
             # Resize scale and label tensors if needed:
             if opt.use_half_image_size:
+                source_label = (nn.functional.interpolate(source_label.unsqueeze(1), scale_factor=[0.5, 0.5], mode='nearest')).squeeze()
                 for i in range(len(source_scales)):
-                    source_labels[i] = (nn.functional.interpolate(source_labels[i].unsqueeze(1), scale_factor=[0.5, 0.5], mode='nearest')).squeeze()
                     source_scales[i] = torch.clamp(nn.functional.interpolate(source_scales[i], scale_factor=[0.5, 0.5], mode='bicubic'), -1, 1)
                     target_scales[i] = torch.clamp(nn.functional.interpolate(target_scales[i], scale_factor=[0.5, 0.5], mode='bicubic'), -1, 1)
 
             # Create segmentation maps if needed:
-            source_segmaps = [one_hot_encoder(source_label) for source_label in source_labels]  if opt.last_scale and not opt.warmup else None
-            # source_segmap = one_hot_encoder(source_label) if opt.last_scale else None
-            if opt.last_scale:
-                target_softs = semseg_cs(target_scales[-1])
-                target_segmap = encode_semseg_out(target_softs, opt.ignore_threshold)
-            else:
-                target_segmap, target_softs = None, None
+            source_label = source_label if opt.last_scale else None
+            source_segmap = one_hot_encoder(source_label) if opt.last_scale else None
+            target_softs = semseg_cs(target_scales[-1]) if opt.last_scale and not opt.warmup else None
+            target_segmap = encode_semseg_out(target_softs, opt.ignore_threshold) if opt.last_scale and not opt.warmup else None
 
-            # # Create pyramid concatenation:
-            # with torch.no_grad():
-            #     prev_sit = concat_pyramid(Gst, source_scales, opt, source_segmap)
-            #     prev_tis = concat_pyramid(Gts, target_scales, opt, target_segmap)
 
             ############################
             # (1) Update D networks: maximize D(x) + D(G(z))
@@ -209,7 +201,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 #     optimizerSemseg.zero_grad()
 
                 # S -> T:
-                D_x, D_G_z, errD = adversarial_disciriminative_train(netDst, netGst, Gst, target_scales[opt.curr_scale], source_scales, opt, real_segmap=source_segmaps)
+                D_x, D_G_z, errD = adversarial_disciriminative_train(netDst, netGst, Gst, target_scales[opt.curr_scale], source_scales, opt, real_segmap=source_segmap)
                 opt.tb.add_scalar('Scale%d/ST/DiscriminatorLoss' % opt.curr_scale, errD.item() / opt.lambda_adversarial, discriminator_steps)
                 opt.tb.add_scalar('Scale%d/ST/DiscriminatorRealImagesLoss' % opt.curr_scale, D_x / opt.lambda_adversarial, discriminator_steps)
                 opt.tb.add_scalar('Scale%d/ST/DiscriminatorFakeImagesLoss' % opt.curr_scale, D_G_z / opt.lambda_adversarial, discriminator_steps)
@@ -239,7 +231,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     optimizerSemsegGen.zero_grad()
 
                 # S -> T:
-                errG = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_segmap=source_segmaps)
+                errG = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_segmap=source_segmap)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorAdversarialLoss' % opt.curr_scale, errG.item() / opt.lambda_adversarial, generator_steps)
 
                 # T -> S:
@@ -254,7 +246,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     #  m_noise, opt)
                     cyc_loss_labels, cyc_loss_x, cyc_loss_y, cyc_loss, cyc_images = cycle_consistency_loss(source_scales, netGst, Gst,
                                                                                                            target_scales, netGts, Gts, opt,
-                                                                                                           source_segmaps, semseg_cs)
+                                                                                                           source_segmap, semseg_cs)
                     opt.tb.add_scalar('Scale%d/Cyclic/LossSTS' % opt.curr_scale, cyc_loss_x.item() / opt.lambda_cyclic, int(generator_steps / opt.cyclic_loss_calc_rate))
                     opt.tb.add_scalar('Scale%d/Cyclic/LossTST' % opt.curr_scale, cyc_loss_y.item() / opt.lambda_cyclic, int(generator_steps / opt.cyclic_loss_calc_rate))
                     opt.tb.add_scalar('Scale%d/Cyclic/Loss' % opt.curr_scale, cyc_loss.item() / opt.lambda_cyclic, int(generator_steps / opt.cyclic_loss_calc_rate))
@@ -276,13 +268,16 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 optimizerSemseg.zero_grad()
                 optimizerGst.zero_grad()
                 # Train semseg on GTA5 image converted to CS, using GTA5 labels:
-                semseg_softs_syn, semseg_labels_syn, semseg_loss_syn = synthetic_semantic_segmentation_loss(source_scales, Gst, netGst, semseg_cs, source_labels, opt)
+                semseg_softs_syn, semseg_labels_syn, semseg_loss_syn = synthetic_semantic_segmentation_loss(source_scales, Gst, netGst, semseg_cs, source_label, opt)
                 opt.tb.add_scalar('Semseg/SemsegCsLoss', semseg_loss_syn.item(), semseg_steps)
-                # Train semseg on trusted labels from CS (sort of self training):
-                trusted_labels_target = strongly_trusted_labels(target_softs, opt.ignore_threshold, IGNORE_LABEL)
-                semseg_softs_real, semseg_labels_real, semseg_loss_real = real_semantic_segmentation_loss(target_scales[-1], trusted_labels_target, semseg_cs, opt)
-                opt.tb.add_scalar('Semseg/SemsegLossSSL', semseg_loss_real.item(), semseg_steps)
-                opt.tb.add_scalar('Semseg/SemsegLoss', semseg_loss_real.item()+semseg_loss_syn.item(), semseg_steps)
+                semseg_total_loss = semseg_loss_syn.item()
+                # Train semseg on trusted labels from CS:
+                if opt.use_distillation and not opt.warmup:
+                    trusted_labels_target = strongly_trusted_labels(target_softs, opt.ignore_threshold, IGNORE_LABEL)
+                    semseg_softs_real, semseg_labels_real, semseg_loss_real = real_semantic_segmentation_loss(target_scales[-1], trusted_labels_target, semseg_cs, opt)
+                    opt.tb.add_scalar('Semseg/SemsegLossDistillation', semseg_loss_real.item(), semseg_steps)
+                    semseg_total_loss += semseg_loss_real.item()
+                opt.tb.add_scalar('Semseg/SemsegLoss', semseg_total_loss, semseg_steps)
                 optimizerSemseg.step()
                 optimizerGst.step()
                 semseg_steps += 1
@@ -297,17 +292,15 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             if int(steps / opt.save_pics_rate) >= save_pics_int or steps == 0:
                 s = norm_image(source_scales[opt.curr_scale][0])
                 t = norm_image(target_scales[opt.curr_scale][0])
-                s_lbl = colorize_mask(source_labels[-1][0])
                 if cyc_images is None:
                     _, _, _, _, cyc_images = cycle_consistency_loss(source_scales, netGst, Gst,
                                                                     target_scales, netGts, Gts, opt,
-                                                                    source_segmaps, semseg_cs)
+                                                                    source_segmap, semseg_cs)
                 sit = norm_image(cyc_images[0][0])
                 sitis = norm_image(cyc_images[1][0])
                 tis = norm_image(cyc_images[2][0])
                 tisit = norm_image(cyc_images[3][0])
                 opt.tb.add_image('Scale%d/source' % opt.curr_scale, s, save_pics_int * opt.save_pics_rate)
-                opt.tb.add_image('Scale%d/source_label' % opt.curr_scale, s_lbl, save_pics_int * opt.save_pics_rate)
                 opt.tb.add_image('Scale%d/source_in_traget' % opt.curr_scale, sit, save_pics_int * opt.save_pics_rate)
                 opt.tb.add_image('Scale%d/source_in_traget_in_source' % opt.curr_scale, sitis, save_pics_int * opt.save_pics_rate)
                 opt.tb.add_image('Scale%d/target' % opt.curr_scale, t, save_pics_int * opt.save_pics_rate)
@@ -318,19 +311,18 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     sit_label = colorize_mask(semseg_labels_syn[0])
                     softs_max = torch.nn.functional.softmax(semseg_softs_syn, dim=1)
                     hist_values = softs_max.max(dim=1)[0][0]
-                    s_label = colorize_mask(source_labels[-1][0])
+                    s_label = colorize_mask(source_label[0])
                     opt.tb.add_image('Scale%d/source_in_target_label' % opt.curr_scale, sit_label, save_pics_int * opt.save_pics_rate)
                     opt.tb.add_image('Scale%d/source_in_target_values' % opt.curr_scale, hist_values, save_pics_int * opt.save_pics_rate, dataformats='HW')
                     opt.tb.add_histogram('Scale%d/source_in_target_histogram' % opt.curr_scale, hist_values, save_pics_int * opt.save_pics_rate, bins='auto')
                     opt.tb.add_image('Scale%d/source_label' % opt.curr_scale, s_label, save_pics_int * opt.save_pics_rate)
-                    # if not opt.warmup:
-                        # target_segmap = one_hot_encoder(encode_semseg_out(target_softs, opt.ignore_threshold), per_class_encode=False, generated_label=True)
-                    softs_max_target = torch.nn.functional.softmax(target_softs, dim=1)
-                    hist_values_target = softs_max_target.max(dim=1)[0][0]
-                    t_label = colorize_mask(trusted_labels_target[0])
-                    opt.tb.add_image('Scale%d/target_values' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, dataformats='HW')
-                    opt.tb.add_histogram('Scale%d/target_histogram' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, bins='auto')
-                    opt.tb.add_image('Scale%d/target_label' % opt.curr_scale, t_label, save_pics_int * opt.save_pics_rate)
+                    if not opt.warmup:
+                        softs_max_target = torch.nn.functional.softmax(cyc_images[4], dim=1)
+                        hist_values_target = softs_max_target.max(dim=1)[0][0]
+                        t_label = colorize_mask(strongly_trusted_labels(cyc_images[4], opt.ignore_threshold, IGNORE_LABEL)[0])
+                        opt.tb.add_image('Scale%d/target_values' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, dataformats='HW')
+                        opt.tb.add_histogram('Scale%d/target_histogram' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, bins='auto')
+                        opt.tb.add_image('Scale%d/target_label' % opt.curr_scale, t_label, save_pics_int * opt.save_pics_rate)
 
                 save_pics_int += 1
 
@@ -360,8 +352,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
 def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, opt, real_segmap=None):
     # train with real image
-    # output = netD(real_images).to(opt.device)
-    output = netD(real_images, real_segmap[-1] if type(real_segmap) == list else real_segmap)
+    output = netD(real_images)
     errD_real = -1 * opt.lambda_adversarial * output.mean()
     errD_real.backward(retain_graph=True)
     D_x = errD_real.item()
@@ -369,14 +360,14 @@ def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, 
     # train with fake
     with torch.no_grad():
         curr = from_scales[opt.curr_scale]
-        prev = concat_pyramid(Gs, from_scales, opt, real_segmap)
-        fake_images = netG(curr, prev, real_segmap[-1] if type(real_segmap) == list else real_segmap)
-    output = netD(fake_images.detach(), real_segmap[-1] if type(real_segmap) == list else real_segmap)
+        prev = concat_pyramid(Gs, from_scales, opt)
+        fake_images = netG(curr, prev, real_segmap)
+    output = netD(fake_images.detach())
     errD_fake = opt.lambda_adversarial * output.mean()
     errD_fake.backward(retain_graph=True)
     D_G_z = errD_fake.item()
 
-    gradient_penalty = opt.lambda_adversarial * calc_gradient_penalty(netD, real_images, fake_images, real_segmap[-1] if type(real_segmap) == list else real_segmap, opt.lambda_grad, opt.device)
+    gradient_penalty = opt.lambda_adversarial * calc_gradient_penalty(netD, real_images, fake_images, opt.lambda_grad, opt.device)
     gradient_penalty.backward()
 
     errD = errD_real + errD_fake + gradient_penalty
@@ -387,9 +378,9 @@ def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, 
 def adversarial_generative_train(netG, netD, Gs, from_scales, opt, real_segmap=None):
     # train with fake
     curr = from_scales[opt.curr_scale]
-    prev = concat_pyramid(Gs, from_scales, opt, real_segmap)
-    fake = netG(curr, prev, real_segmap[-1] if type(real_segmap) == list else real_segmap)
-    output = netD(fake, real_segmap[-1] if type(real_segmap) == list else real_segmap)
+    prev = concat_pyramid(Gs, from_scales, opt)
+    fake = netG(curr, prev, real_segmap)
+    output = netD(fake)
     errG = -1 * opt.lambda_adversarial * output.mean()
     errG.backward()
     return errG
@@ -397,60 +388,67 @@ def adversarial_generative_train(netG, netD, Gs, from_scales, opt, real_segmap=N
 
 def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
                            target_scales, currGts, Gts_pyramid, opt,
-                           segmaps_source=None, semseg_net=None):
+                           segmap_source=None, semseg_net=None):
     criterion_sts = nn.L1Loss()
     criterion_tst = nn.L1Loss()
     criterion_labels = nn.L1Loss()
     source_batch = source_scales[-1]
     target_batch = target_scales[-1]
     loss_labels = None
-
+    images = []
     # source in target:
     with torch.no_grad():
-        prev_sit = concat_pyramid(Gst_pyramid, source_scales, opt, segmaps_source)
-    sit_image = currGst(source_batch, prev_sit, segmaps_source[-1] if type(segmaps_source) == list else segmaps_source)
+        prev_sit = concat_pyramid(Gst_pyramid, source_scales, opt)
+    sit_image = currGst(source_batch, prev_sit, segmap_source)
+    images.append(sit_image)
     with torch.no_grad():
         generated_pyramid_sit = GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
-        prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt, segmaps_source)
+        prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt)
     # source in target in source:
-    sitis_image = currGts(sit_image, prev_sit_generated, segmaps_source[-1] if type(segmaps_source) == list else segmaps_source)
+    sitis_image = currGts(sit_image, prev_sit_generated, segmap_source)
+    images.append(sitis_image)
     loss_sts = opt.lambda_cyclic * criterion_sts(sitis_image, source_batch)
     loss_sts.backward()
 
     # traget in source:
-    if opt.use_semseg_generation_training:
-        segmap_target = encode_semseg_out(semseg_net(target_batch), opt.ignore_threshold) if opt.last_scale and not opt.warmup else None
+    if opt.use_semseg_generation_training and opt.last_scale and not opt.warmup:
+        softs_target = semseg_net(target_batch)
+        segmap_target = encode_semseg_out(softs_target, opt.ignore_threshold)
     else:
+        softs_target = None
         segmap_target = None
 
     with torch.no_grad():
-        prev_tis = concat_pyramid(Gts_pyramid, target_scales, opt, segmap_target)
+        prev_tis = concat_pyramid(Gts_pyramid, target_scales, opt)
     tis_image = currGts(target_batch, prev_tis, segmap_target)
+    images.append(tis_image)
     with torch.no_grad():
         generated_pyramid_tis = GeneratePyramid(tis_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
-        prev_tis_generated = concat_pyramid(Gst_pyramid, generated_pyramid_tis, opt, segmap_target)
+        prev_tis_generated = concat_pyramid(Gst_pyramid, generated_pyramid_tis, opt)
     # target in source in target:
     tisit_image = currGst(tis_image, prev_tis_generated, segmap_target)
+    images.append(tisit_image)
     loss_tst = opt.lambda_cyclic * criterion_tst(tisit_image, target_batch)
     loss_tst.backward(retain_graph=opt.last_scale and not opt.warmup)
 
     # Label cyclic loss:
     if opt.last_scale and not opt.warmup:
         if segmap_target == None:
-            segmap_target = encode_semseg_out(semseg_net(target_batch), opt.ignore_threshold) if opt.last_scale and not opt.warmup else None
+            segmap_target = encode_semseg_out(semseg_net(target_batch), opt.ignore_threshold)
         tisit_segmap = encode_semseg_out(semseg_net(tisit_image), opt.ignore_threshold)
         loss_labels = opt.lambda_cyclic * criterion_labels(tisit_segmap[:, :NUM_CLASSES, :, :], segmap_target[:, :NUM_CLASSES, :, :])
         loss_labels.backward()
 
+    images.append(softs_target)
     loss = loss_sts + loss_tst
 
-    return loss_labels, loss_sts, loss_tst, loss, (sit_image, sitis_image, tis_image, tisit_image)
+    return loss_labels, loss_sts, loss_tst, loss, images
 
 
 def synthetic_semantic_segmentation_loss(input_pyramid, Gs, currG, semseg_net, input_label, opt):
-    prev_converted_image = concat_pyramid(Gs, input_pyramid, opt, input_label)
-    converted_image = currG(input_pyramid[-1], prev_converted_image, one_hot_encoder(input_label[-1] if type(input_label) == list else input_label) if not opt.warmup else None)
-    output_softs, semseg_loss = semseg_net(converted_image, input_label[-1] if type(input_label) == list else input_label)
+    prev_converted_image = concat_pyramid(Gs, input_pyramid, opt)
+    converted_image = currG(input_pyramid[-1], prev_converted_image, one_hot_encoder(input_label) if not opt.warmup else None)
+    output_softs, semseg_loss = semseg_net(converted_image, input_label)
     semseg_loss = semseg_loss.mean()
     output_label = output_softs.argmax(1)
     semseg_loss.backward()
@@ -464,22 +462,22 @@ def real_semantic_segmentation_loss(input_target_image, trusted_label, semseg_ne
     return output_softs, output_label, semseg_loss
 
 
-def concat_pyramid(Gs, sources, opt, labels=None):
+def concat_pyramid(Gs, sources, opt):
     if len(Gs) == 0:
         return torch.zeros_like(sources[0])
     with torch.no_grad():
         G_z = sources[0]
-        labels = [None] * len(sources) if labels == None else labels
-        for G, source_curr, source_next, label_curr in zip(Gs, sources, sources[1:], labels):
+        # labels = [None] * len(sources) if labels == None else labels
+        for G, source_curr, source_next in zip(Gs, sources, sources[1:]):
             G_z = G_z[:, :, 0:source_curr.shape[2], 0:source_curr.shape[3]]
-            G_z = G(source_curr, G_z.detach(), label_curr)
+            G_z = G(source_curr, G_z.detach())
             # G_z = imresize(G_z, 1 / opt.scale_factor, opt)
             G_z = imresize_torch(G_z, 1 / opt.scale_factor, mode='bicubic')
             G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
     return G_z.detach()
 
 
-def init_models(opt, use_label_in_discriminator=False):
+def init_models(opt):
     use_four_level_net = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H, W) / 16 > opt.ker_size
     # generator initialization:
     if opt.use_unet_generator:
@@ -502,7 +500,7 @@ def init_models(opt, use_label_in_discriminator=False):
     if opt.use_downscale_discriminator:
         netD = models.WDiscriminatorDownscale(opt, use_four_level_net).to(opt.device)
     else:
-        netD = models.WDiscriminator(opt, use_label_in_discriminator).to(opt.device)
+        netD = models.WDiscriminator(opt).to(opt.device)
     netD.apply(models.weights_init)
 
     return netD, netG
@@ -578,41 +576,3 @@ def calculte_validation_accuracy(semseg_net, target_val_loader, epoch_num, opt):
 
         running_metrics_val.reset()
     return iou, miou, cm
-
-# def handler(nets_dict, signum, frame):
-#     if not nets_dict['debug']:
-#         torch.save(nets_dict['Gst'], '%s/Gst.pth' % (nets_dict['out_path']))
-#         torch.save(nets_dict['Gts'], '%s/Gts.pth' % (nets_dict['out_path']))
-#         torch.save(nets_dict['Dst'], '%s/Dst.pth' % (nets_dict['out_path']))
-#         torch.save(nets_dict['Dts'], '%s/Dts.pth' % (nets_dict['out_path']))
-#         if nets_dict['semseg_cs'] != None:
-#             torch.save(nets_dict['semseg_cs'], '%s/semseg_cs.pth' % (nets_dict['out_path']))
-#         print('\nExited unexpectedly. Pyramids & semseg has been saved successfully.')
-#         print('Length of pyramid list:', len(nets_dict['Gst']))
-#         print('Exiting. Bye!')
-#     sys.exit(0)
-#
-# class GracefulExit:
-#     def __init__(self, path_to_save_networks, is_debug):
-#         self.path_to_save_networks = path_to_save_networks
-#         self.Gst = []
-#         self.Gts = []
-#         self.Dst = []
-#         self.Dts = []
-#         self.semseg_cs = None
-#         self.net_dict = {'Gts' : self.Gts,
-#                          'Gst' : self.Gst,
-#                          'Dts' : self.Dts,
-#                          'Dst' : self.Dst,
-#                          'semseg_cs' : self.semseg_cs,
-#                          'out_path' : path_to_save_networks,
-#                          'debug' : is_debug}
-#
-#     def __enter__(self):
-#         signal.signal(signal.SIGTERM,  partial(handler, self.net_dict))
-#         signal.signal(signal.SIGINT,   partial(handler, self.net_dict))
-#
-#     def __exit__(self, type, value, traceback):
-#         pass
-#
-#
