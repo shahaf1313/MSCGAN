@@ -2,12 +2,14 @@ import os.path as osp
 from data.domainAdaptationDataset import domainAdaptationDataSet
 from PIL import Image
 import numpy as np
+import torch
 from core.constants import IMG_RESIZE
 
 class GTA5DataSet(domainAdaptationDataSet):
-    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False):
+    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_image_label_pyramid=False):
         super(GTA5DataSet, self).__init__(root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
         self.resize = IMG_RESIZE
+        self.get_image_label_pyramid = get_image_label_pyramid
     def __len__(self):
         return len(self.img_ids)
 
@@ -23,22 +25,32 @@ class GTA5DataSet(domainAdaptationDataSet):
         lower= upper+ self.crop_size[1]
         image = image.crop((left, upper, right, lower))
 
-        label, label_copy = None, None
-        if self.get_image_label:
+        label, label_copy, labels_pyramid = None, None, None
+        if self.get_image_label or self.get_image_label_pyramid:
             label = Image.open(osp.join(self.root, "labels/%s" % name))
             label = label.resize(self.resize, Image.NEAREST)
             label = label.crop((left, upper, right, lower))
-            label = np.asarray(label, np.float32)
-            label_copy = self.ignore_label * np.ones(label.shape, dtype=np.float32)
-            for k, v in self.id_to_trainid.items():
-                label_copy[label == k] = v
-            label_copy = label_copy.copy()
+            if self.get_image_label_pyramid:
+                labels_pyramid =  self.GeneratePyramid(label, is_label=True)
+                labels_pyramid = [self.convert_to_class_ids(label_scale) for label_scale in labels_pyramid]
+            else:
+                label = self.convert_to_class_ids(label)
+
 
         scales_pyramid = self.GeneratePyramid(image)
         if self.get_image_label:
-            return scales_pyramid, label_copy
+            return scales_pyramid, label
+        elif self.get_image_label_pyramid:
+            return scales_pyramid, labels_pyramid
         else:
             return scales_pyramid
+
+    def convert_to_class_ids(self, label_image):
+        label = np.asarray(label_image, np.float32)
+        label_copy = self.ignore_label * np.ones(label.shape, dtype=np.float32)
+        for k, v in self.id_to_trainid.items():
+            label_copy[label == k] = v
+        return label_copy
 
     # def SetEpochSize(self, epoch_size):
     #     if (epoch_size > len(self.img_ids)):

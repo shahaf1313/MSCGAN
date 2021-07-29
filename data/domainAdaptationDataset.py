@@ -33,8 +33,8 @@ class domainAdaptationDataSet(data.Dataset):
         self.img_ids = self.img_ids[:epoch_size]
 
 
-    def GeneratePyramid(self, image: Image):
-        scales_pyramid = GeneratePyramid(image, self.num_scales, self.curr_scale, self.scale_factor, self.crop_size)
+    def GeneratePyramid(self, image, is_label=False):
+        scales_pyramid = GeneratePyramid(image, self.num_scales, self.curr_scale, self.scale_factor, self.crop_size, is_label=is_label)
 
         return scales_pyramid
 
