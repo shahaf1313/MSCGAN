@@ -35,6 +35,7 @@ def get_arguments():
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs before switching to label conditioned generator.')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
+    parser.add_argument('--use_labels_discriminator', default=False, action='store_true', help='Uses labels concatenation in the discriminator')
     parser.add_argument('--nfc', type=int, default=8)
     parser.add_argument('--ker_size', type=int, help='kernel size', default=3)
     parser.add_argument('--num_layer', type=int, help='number of layers', default=5)
@@ -61,6 +62,7 @@ def get_arguments():
     parser.add_argument('--lambda_grad', type=float, help='gradient penelty weight', default=0.1)
     parser.add_argument('--lambda_adversarial', type=float, help='adversarial loss weight', default=1)
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
+    parser.add_argument('--dont_normalize_spade', default=False, action='store_true', help='Chooses whether to normalize or not tha batch begore using spade normalization')
 
     # Semseg network parameters:
     parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLab and VGG")
@@ -70,6 +72,7 @@ def get_arguments():
     parser.add_argument("--multiscale_model_path", type=str, default='', help="path to Generators from source to target domain and vice versa.")
     parser.add_argument("--semseg_model_path", type=str, default='', help="path to folder that contains classifier and feature extractor weights.")
     parser.add_argument("--semseg_model_epoch_to_resume", type=int, default=-1, help='Epoch that checkpoint to semseg net saved from')
+    parser.add_argument('--use_semseg_generation_training', default=False, action='store_true', help='Uses label generation training in the semseg network.')
     parser.add_argument('--load_only_gta_weights', default=False, action='store_true', help='Loads only source (GTA5) semeseg weigths.')
     parser.add_argument('--lr_semseg', type=float, default=0.00025, help='learning rate, default=0.00025')
     parser.add_argument("--weight-decay", type=float, default=0.0005, help="Regularisation parameter for L2-loss.")
