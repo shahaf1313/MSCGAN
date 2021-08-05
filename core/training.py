@@ -380,7 +380,6 @@ def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, 
 
     return D_x, D_G_z, errD
 
-
 def adversarial_generative_train(netG, netD, Gs, from_scales, opt, real_segmap=None):
     # train with fake
     curr = from_scales[opt.curr_scale]
