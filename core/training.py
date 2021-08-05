@@ -24,6 +24,11 @@ def train(opt):
     semseg_cs = None
     if opt.continue_train_from_path != '':
         Gst, Gts, Dst, Dts = load_trained_networks(opt)
+        # for gst, gts, dst, dts in zip(Gst, Gts, Dst, Dts):
+        #     dst.use_extended_generator = False
+        #     dts.use_extended_generator = False
+        #     gst.use_extended_generator = False
+        #     gts.use_extended_generator = False
         # todo: add loading semseg network
         assert len(Gst) == len(Gts) == len(Dst) == len(Dts)
         scale_num = len(Gst) - 1 if opt.resume_to_epoch > 0 else len(Gst)
@@ -358,6 +363,7 @@ def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, 
     D_x = errD_real.item()
 
     # train with fake
+    # fake_images = generate_image(netG, from_scales[opt.curr_scale], Gs, from_scales, real_segmap, opt, grad_on_generator=False)
     with torch.no_grad():
         curr = from_scales[opt.curr_scale]
         prev = concat_pyramid(Gs, from_scales, opt)
@@ -476,6 +482,18 @@ def concat_pyramid(Gs, sources, opt):
             G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
     return G_z.detach()
 
+def generate_image(netG, curr_images, Gs, scales, cond_image, opt, grad_on_generator=True):
+    fake_images = None
+    with torch.no_grad():
+        prevs = concat_pyramid(Gs, scales, opt)
+        if grad_on_generator:
+            fake_images = netG(curr_images, prevs, cond_image)
+
+    # out of no_grad() context!
+    if not grad_on_generator:
+        fake_images = netG(curr_images, prevs, cond_image)
+
+    return fake_images
 
 def init_models(opt):
     use_four_level_net = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H, W) / 16 > opt.ker_size
@@ -488,6 +506,8 @@ def init_models(opt):
         else:
             print('Generating 2 layers UNET model')
             netG = models.UNetGeneratorTwoLayers(opt).to(opt.device)
+    elif opt.use_fcc or opt.use_fcc_g:
+        netG = models.FCCGenerator(opt).to(opt.device)
     else:  # Conditial Generator(!):
         netG = models.LabelConditionedGenerator(opt).to(opt.device)
         # if opt.curr_scale == opt.num_scales: # last scale, initialize label conditioning:
@@ -499,6 +519,8 @@ def init_models(opt):
     # discriminator initialization:
     if opt.use_downscale_discriminator:
         netD = models.WDiscriminatorDownscale(opt, use_four_level_net).to(opt.device)
+    elif opt.use_fcc or opt.use_fcc_d:
+        netD = models.FCCDiscriminator(opt).to(opt.device)
     else:
         netD = models.WDiscriminator(opt).to(opt.device)
     netD.apply(models.weights_init)

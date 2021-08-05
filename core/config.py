@@ -35,12 +35,15 @@ def get_arguments():
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs before switching to label conditioned generator.')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
-    parser.add_argument('--use_labels_discriminator', default=False, action='store_true', help='Uses labels concatenation in the discriminator')
+    parser.add_argument('--use_fcc', default=False, action='store_true', help='Uses FC and Convolutional discriminator and generator')
+    parser.add_argument('--use_fcc_d', default=False, action='store_true', help='Uses FC and Convolutional discriminator')
+    parser.add_argument('--use_fcc_g', default=False, action='store_true', help='Uses FC and Convolutional generator')
+    parser.add_argument('--pool_type', type=str, default='avg', help='Determines pooling type in the FCC discriminator (max for max pool, avg for average pool')
     parser.add_argument('--nfc', type=int, default=8)
     parser.add_argument('--ker_size', type=int, help='kernel size', default=3)
     parser.add_argument('--num_layer', type=int, help='number of layers', default=5)
     parser.add_argument('--stride', help='stride', default=1)
-    parser.add_argument('--padd_size', type=int, help='net pad size', default=0)  # math.floor(opt.ker_size/2)
+    parser.add_argument('--padd_size', type=int, help='net pad size', default=1)  # math.floor(opt.ker_size/2)
 
     # pyramid parameters:
     parser.add_argument('--scale_factor', type=float, help='pyramid scale factor', default=0.75)  # pow(0.5,1/6))

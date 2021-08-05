@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
-from core.constants import NUM_CLASSES
+from core.constants import NUM_CLASSES, H, W
+import numpy as np
 
 
+# Blocks:
 class ConvBlock(nn.Sequential):
     def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type):
         super(ConvBlock,self).__init__()
@@ -34,31 +36,154 @@ class ConvBlockSpade(nn.Module):
                 z = self.conv(self.actvn(self.spade(x, seg_map)))
             return z
 
-
-class LabelConditionedGenerator(nn.Module):
-    def __init__(self, opt):
-        super(LabelConditionedGenerator, self).__init__()
-        self.is_initial_scale = opt.curr_scale == 0
-        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.tail_actvn = nn.Tanh()
-    def forward(self, curr_scale, prev_scale, seg_map=None):
-        if self.is_initial_scale:
-            z = curr_scale
+class SPADE(nn.Module):
+    # # Creates SPADE normalization layer based on the given configuration
+    # SPADE consists of two steps. First, it normalizes the activations using
+    # your favorite normalization method, such as Batch Norm or Instance Norm.
+    # Second, it applies scale and bias to the normalized output, conditioned on
+    # the segmentation map.
+    # The format of |config_text| is spade(norm)(ks), where
+    # (norm) specifies the type of parameter-free normalization.
+    #       (e.g. syncbatch, batch, instance)
+    # (ks) specifies the size of kernel in the SPADE module (e.g. 3x3)
+    # Example |config_text| will be spadesyncbatch3x3, or spadeinstance5x5.
+    # Also, the other arguments are
+    # |norm_nc|: the #channels of the normalized activations, hence the output dim of SPADE
+    # |label_nc|: the #channels of the input semantic map, hence the input dim of SPADE
+    def __init__(self, param_free_norm_type, kernel_size, norm_nc, label_nc):
+        super().__init__()
+        if param_free_norm_type == 'instance_norm':
+            self.param_free_norm = nn.InstanceNorm2d(norm_nc, affine=False)
+        elif param_free_norm_type == 'batch_norm':
+            self.param_free_norm = nn.BatchNorm2d(norm_nc, affine=False)
         else:
-            z = torch.cat((curr_scale, prev_scale), 1)
+            raise ValueError('%s is not a recognized param-free norm type in SPADE'
+                             % param_free_norm_type)
 
-        z = self.head(z, seg_map)
-        z = self.body_1(z, seg_map)
-        z = self.body_2(z, seg_map)
-        z = self.body_3(z, seg_map)
-        z = self.tail(z, seg_map)
-        z = self.tail_actvn(z)
-        return z
+        # The dimension of the intermediate embedding space. Yes, hardcoded.
+        nhidden = 128
+        # nhidden = 64
 
+        pw = kernel_size // 2
+        self.mlp_shared = nn.Sequential(
+            nn.Conv2d(label_nc, nhidden, kernel_size=kernel_size, padding=pw),
+            nn.ReLU()
+        )
+        self.mlp_gamma = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
+        self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
+
+    def forward(self, x, segmap):
+
+        # Part 1. generate parameter-free normalized activations
+        normalized = self.param_free_norm(x)
+
+        # Part 2. produce scaling and bias conditioned on semantic map
+        segmap = nn.functional.interpolate(segmap, size=x.size()[2:], mode='nearest')
+        actv = self.mlp_shared(segmap)
+        gamma = self.mlp_gamma(actv)
+        beta = self.mlp_beta(actv)
+
+        # apply scale and bias
+        out = normalized * (1 + gamma) + beta
+        # out = x * (1 + gamma) + beta
+
+        return out
+
+class RAD(nn.Module):
+    def __init__(self, kernel_size, norm_nc, label_nc):
+        super(RAD, self).__init__()
+        self.param_free_norm = nn.GroupNorm(num_groups=4, num_channels=norm_nc, affine=False)
+        # The dimension of the intermediate embedding space. Yes, hardcoded.
+        nhidden = 128
+
+        pw = kernel_size // 2
+        self.mlp_shared = nn.Sequential(
+            ResBlockRAD(label_nc, nhidden, kernel_size, pw),
+            ResBlockRAD(nhidden, nhidden, kernel_size, pw),
+            ResBlockRAD(nhidden, nhidden, kernel_size, pw)
+        )
+        self.mlp_gamma = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
+        self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
+
+    def forward(self, x, segmap):
+
+        # Part 1. generate parameter-free normalized activations
+        normalized = self.param_free_norm(x)
+
+        # Part 2. produce scaling and bias conditioned on semantic map
+        segmap = nn.functional.interpolate(segmap, size=x.size()[2:], mode='nearest')
+        actv = self.mlp_shared(segmap)
+        gamma = self.mlp_gamma(actv)
+        beta = self.mlp_beta(actv)
+
+        # apply scale and bias
+        out = normalized * (1 + gamma) + beta
+        # out = x * (1 + gamma) + beta
+
+        return out
+
+class ResBlockRAD(nn.Module):
+    def __init__(self, in_channels, out_channels, ker_size, padd, activation='relu'):
+        super(ResBlockRAD, self).__init__()
+        self.in_channels, self.out_channels, self.activation = in_channels, out_channels, activation
+        self.blocks = nn.Sequential(nn.Conv2d(in_channels, out_channels, ker_size, padding=padd),
+                                    nn.LeakyReLU(0.2),
+                                    nn.Conv2d(out_channels, out_channels, ker_size, padding=padd))
+        self.activate = self.activation_func(activation)
+        self.shortcut = nn.Conv2d(in_channels, out_channels, ker_size, padding=padd)
+
+    def forward(self, x):
+        residual = x
+        if self.should_apply_shortcut: residual = self.shortcut(x)
+        x = self.blocks(x)
+        x += residual
+        x = self.activate(x)
+        return x
+
+    @property
+    def should_apply_shortcut(self):
+        return self.in_channels != self.out_channels
+
+    def activation_func(self, activation):
+        return  nn.ModuleDict([
+            ['relu', nn.ReLU(inplace=True)],
+            ['leaky_relu', nn.LeakyReLU(negative_slope=0.2, inplace=True)],
+            ['selu', nn.SELU(inplace=True)],
+            ['none', nn.Identity()]
+        ])[activation]
+
+class LocalNet(nn.Module):
+
+    def forward(self, x_in):
+        """Double convolutional block
+
+        :param x_in: image features
+        :returns: image features
+        :rtype: Tensor
+
+        """
+        x = self.lrelu(self.conv1(self.refpad(x_in)))
+        x = self.lrelu(self.conv2(self.refpad(x)))
+
+        return x
+
+    def __init__(self, in_channels=16, out_channels=64):
+        """Double convolutional block
+
+        :param in_channels:  number of input channels
+        :param out_channels: number of output channels
+        :returns: N/A
+        :rtype: N/A
+
+        """
+        super(LocalNet, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, 0, 1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, 0, 1)
+        self.lrelu = nn.LeakyReLU()
+        self.refpad = nn.ReflectionPad2d(1)
+
+
+# Generators:
 class ConvGenerator(nn.Module):
     def __init__(self, opt):
         super(ConvGenerator, self).__init__()
@@ -86,32 +211,35 @@ class ConvGenerator(nn.Module):
         # z = z[:,:,ind:(prev_scale.shape[2]-ind),ind:(curr_scale.shape[3]-ind)]
         return z
 
-class WDiscriminator(nn.Module):
+class LabelConditionedGenerator(nn.Module):
     def __init__(self, opt):
-        super(WDiscriminator, self).__init__()
-        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body = nn.Sequential()
-        for i in range(opt.num_layer-2):
-            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-            self.body.add_module('block%d'%(i+1),block)
-        self.tail = nn.Sequential(nn.Conv2d(opt.base_channels,1,kernel_size=opt.ker_size,stride=1,padding=1),
-                                  nn.BatchNorm2d(1), #todo: I added, see what is happening
-                                  nn.LeakyReLU(0.2))
+        super(LabelConditionedGenerator, self).__init__()
+        self.is_initial_scale = opt.curr_scale == 0
+        self.use_extended_generator = opt.curr_scale >= opt.num_scales - 1
+        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.tail_actvn = nn.Tanh()
+    def forward(self, curr_scale, prev_scale, seg_map=None):
+        if self.is_initial_scale:
+            z = curr_scale
+        else:
+            z = torch.cat((curr_scale, prev_scale), 1)
 
-    def forward(self, x):
-        x = self.head(x)
-        x = self.body(x)
-        x = self.tail(x)
-        return x
-
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv2d') != -1:
-        m.weight.data.normal_(0.0, 0.02)
-    elif classname.find('Norm') != -1:
-        if m.affine == True:
-            m.weight.data.normal_(1.0, 0.02)
-            m.bias.data.fill_(0)
+        z = self.head(z, seg_map)
+        z = self.body_1(z, seg_map)
+        z = self.body_2(z, seg_map)
+        z = self.body_3(z, seg_map)
+        if self.use_extended_generator:
+            z = self.body_4(z, seg_map)
+            z = self.body_5(z, seg_map)
+        z = self.tail(z, seg_map)
+        z = self.tail_actvn(z)
+        return z
 
 class UNetGeneratorFourLayers(nn.Module):
 
@@ -287,36 +415,108 @@ class UNetGeneratorTwoLayers(nn.Module):
 
         return out
 
+class FCCGenerator(nn.Module):
+    def __init__(self, opt):
+        super(FCCGenerator, self).__init__()
+        self.is_initial_scale = opt.curr_scale == 0
+        self.embedding_features_size = [8, 16]
+        self.embedding_channels_size = 64
+        self.embedding_size = self.embedding_features_size[0] * self.embedding_features_size[1] * self.embedding_channels_size
+        self.scale_size = [int(opt.scale_factor**(opt.num_scales-opt.curr_scale) * H),
+                           int(opt.scale_factor**(opt.num_scales-opt.curr_scale) * W)]
+        assert H == W/2
+        self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
 
-class LocalNet(nn.Module):
+        # Down Conv:
+        self.conv_1_down = ConvBlockSpade(opt.nc_im,
+                                     self.embedding_channels_size//4,
+                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-    def forward(self, x_in):
-        """Double convolutional block
+        self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//4,
+                                     self.embedding_channels_size//2,
+                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        :param x_in: image features
-        :returns: image features
-        :rtype: Tensor
+        self.conv_3_down = ConvBlockSpade(self.embedding_channels_size//2,
+                                     self.embedding_channels_size,
+                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        """
-        x = self.lrelu(self.conv1(self.refpad(x_in)))
-        x = self.lrelu(self.conv2(self.refpad(x)))
+        # Up Conv:
+        self.conv_1_up = ConvBlockSpade(self.embedding_channels_size,
+                                          self.embedding_channels_size//2,
+                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
+        self.conv_2_up = ConvBlockSpade(self.embedding_channels_size//2,
+                                          self.embedding_channels_size//4,
+                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+
+        self.conv_3_up = ConvBlockSpade(self.embedding_channels_size//4,
+                                          opt.nc_im,
+                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+
+        # Down FC:
+        self.fc_1_down = nn.Sequential(nn.BatchNorm1d(self.embedding_size),
+                                  nn.LeakyReLU(0.2),
+                                  nn.Linear(self.embedding_size, self.embedding_size//2**4, bias=True))
+
+        self.fc_2_down = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**4),
+                                  nn.LeakyReLU(0.2),
+                                  nn.Linear(self.embedding_size//2**4, self.embedding_size//2**8, bias=True))
+
+        # Up FC:
+        self.fc_1_up = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**8),
+                                  nn.LeakyReLU(0.2),
+                                  nn.Linear(self.embedding_size//2**8, self.embedding_size//2**4, bias=True))
+
+        self.fc_2_up = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**4),
+                                  nn.LeakyReLU(0.2),
+                                  nn.Linear(self.embedding_size//2**4, self.embedding_size, bias=True))
+
+        # Final activation:
+        self.final_actvn = nn.Tanh()
+    def forward(self, curr_scale, prev_scale, seg_map=None):
+        if self.is_initial_scale:
+            x = curr_scale
+        else:
+            x = torch.cat((curr_scale, prev_scale), 1)
+        x = self.conv_1_down(x)
+        x = self.conv_2_down(x)
+        x = nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='nearest')
+        x = self.conv_3_down(x)
+        x = nn.functional.interpolate(x, size=self.embedding_features_size, mode='nearest')
+        x = x.view((x.shape[0],-1))
+        x = self.fc_1_down(x)
+        x = self.fc_2_down(x)
+        x = self.fc_1_up(x)
+        x = self.fc_2_up(x)
+        x = x.view((x.shape[0], self.embedding_channels_size, self.embedding_features_size[0], self.embedding_features_size[1] ))
+        x = self.conv_1_up(x)
+        x = nn.functional.interpolate(x, scale_factor=1./self.scale_factor, mode='nearest')
+        x = self.conv_2_up(x)
+        x = nn.functional.interpolate(x, size=self.scale_size, mode='nearest')
+        x = self.conv_3_up(x)
+        x = self.final_actvn(x)
         return x
 
-    def __init__(self, in_channels=16, out_channels=64):
-        """Double convolutional block
 
-        :param in_channels:  number of input channels
-        :param out_channels: number of output channels
-        :returns: N/A
-        :rtype: N/A
+# Discriminators:
+class WDiscriminator(nn.Module):
+    def __init__(self, opt):
+        super(WDiscriminator, self).__init__()
+        num_layer_in_body = opt.num_layer if opt.curr_scale >= opt.num_scales - 1 else opt.num_layer-2
+        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body = nn.Sequential()
+        for i in range(num_layer_in_body):
+            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+            self.body.add_module('block%d'%(i+1),block)
+        self.tail = nn.Sequential(nn.Conv2d(opt.base_channels,1,kernel_size=opt.ker_size,stride=1,padding=1),
+                                  nn.BatchNorm2d(1), #todo: I added, see what is happening
+                                  nn.LeakyReLU(0.2))
 
-        """
-        super(LocalNet, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, 0, 1)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, 0, 1)
-        self.lrelu = nn.LeakyReLU()
-        self.refpad = nn.ReflectionPad2d(1)
+    def forward(self, x):
+        x = self.head(x)
+        x = self.body(x)
+        x = self.tail(x)
+        return x
 
 class WDiscriminatorDownscale(nn.Module):
     def __init__(self, opt, four_level_discriminator):
@@ -365,128 +565,60 @@ class WDiscriminatorDownscale(nn.Module):
             return x4
         return  x2
 
-class FCCDiscriminatorLargestScale(nn.Module):
-    def __init__(self, opt, label_exists):
-        super(FCCDiscriminatorLargestScale, self).__init__()
+class FCCDiscriminator(nn.Module):
+    def __init__(self, opt):
+        super(FCCDiscriminator, self).__init__()
+        self.embedding_features_size = [8, 16]
+        self.embedding_channels_size = 64
+        self.embedding_size = self.embedding_features_size[0] * self.embedding_features_size[1] * self.embedding_channels_size
+        self.scale_size = [opt.scale_factor**(opt.num_scales-opt.curr_scale) * H,
+                           opt.scale_factor**(opt.num_scales-opt.curr_scale) * W]
+        assert H == W/2
+        self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
 
-        self.l0 = nn.Sequential(
-            nn.BatchNorm2d((1+label_exists)*opt.nc_im),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d((1+label_exists)*opt.nc_im, 8, kernel_size=4, stride=4, padding=1)
-        )
-        self.l1 = nn.Sequential(
-            nn.BatchNorm2d(8),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(8, 16, kernel_size=4, stride=4, padding=1)
-        )
-        self.l2 = nn.Sequential(
-            nn.BatchNorm2d(16),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(16, 32, kernel_size=4, stride=2, padding=1)
-        )
-        self.l3 = nn.Sequential(
-            nn.Linear(2**14, 2**10),
-            nn.LeakyReLU(0.2)
-        )
-        self.l4 = nn.Sequential(
-            nn.Linear(2**10, 2**6),
-            nn.LeakyReLU(0.2)
-        )
-        self.l5 = nn.Sequential(
-            nn.Linear(2**6, 2**0),
-            nn.LeakyReLU(0.2)
-        )
+        self.conv_1 = ConvBlockSpade(opt.nc_im,
+                                     self.embedding_channels_size//4,
+                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+
+        self.conv_2 = ConvBlockSpade(self.embedding_channels_size//4,
+                                     self.embedding_channels_size//2,
+                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+
+        self.conv_3 = ConvBlockSpade(self.embedding_channels_size//2,
+                                     self.embedding_channels_size,
+                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+
+        self.fc_1 = nn.Sequential(nn.BatchNorm1d(self.embedding_size),
+                                  nn.LeakyReLU(0.2),
+                                  nn.Linear(self.embedding_size, self.embedding_size//2**4, bias=True))
+
+        self.fc_2 = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**4),
+                                  nn.LeakyReLU(0.2),
+                                  nn.Linear(self.embedding_size//2**4, self.embedding_size//2**8, bias=True))
+
+        self.fc_3 = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**8),
+                                  nn.LeakyReLU(0.2),
+                                  nn.Linear(self.embedding_size//2**8, 1, bias=True))
 
     def forward(self, x):
-        x0 = self.l0(x)
-        x1 = self.l1(x0)
-        x2 = self.l2(x1)
-        x2 = x2.view(-1)
-        x3 = self.l3(x2)
-        x4 = self.l4(x3)
-        x5 = self.l5(x4)
-        return  x5
+        x = self.conv_1(x)
+        x = self.conv_2(x)
+        x = nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='nearest')
+        x = self.conv_3(x)
+        x = nn.functional.interpolate(x, size=self.embedding_features_size, mode='nearest')
+        x = x.view((x.shape[0],-1))
+        x = self.fc_1(x)
+        x = self.fc_2(x)
+        x = self.fc_3(x)
+        return x
 
 
-class LabelConditionedGeneratorV2(nn.Module):
-    def __init__(self, opt):
-        super(LabelConditionedGeneratorV2, self).__init__()
-        self.is_initial_scale = opt.curr_scale == 0
-        alpha = 1 if self.is_initial_scale else 0
-        self.conv_1_down = ConvBlockSpade((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=2, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-        self.conv_2_down = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=2, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-        self.conv_1_up = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-        self.conv_2_up = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-
-        # for i in range(opt.num_layer-2):
-        #     block = ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
-        #     self.body.append(block)
-        self.tail = ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1, dont_normalize_spade=opt.dont_normalize_spade, norm_type=opt.norm_type)
-        self.tail_actvn = nn.Tanh()
-    def forward(self, curr_scale, prev_scale, seg_map=None):
-        if self.is_initial_scale:
-            z = curr_scale
-        else:
-            z = torch.cat((curr_scale, prev_scale), 1)
-
-        z = self.head(z, seg_map)
-        z = self.body_1(z, seg_map)
-        z = self.body_2(z, seg_map)
-        z = self.body_3(z, seg_map)
-        z = self.tail(z, seg_map)
-        z = self.tail_actvn(z)
-        return z
-
-
-# # Creates SPADE normalization layer based on the given configuration
-# SPADE consists of two steps. First, it normalizes the activations using
-# your favorite normalization method, such as Batch Norm or Instance Norm.
-# Second, it applies scale and bias to the normalized output, conditioned on
-# the segmentation map.
-# The format of |config_text| is spade(norm)(ks), where
-# (norm) specifies the type of parameter-free normalization.
-#       (e.g. syncbatch, batch, instance)
-# (ks) specifies the size of kernel in the SPADE module (e.g. 3x3)
-# Example |config_text| will be spadesyncbatch3x3, or spadeinstance5x5.
-# Also, the other arguments are
-# |norm_nc|: the #channels of the normalized activations, hence the output dim of SPADE
-# |label_nc|: the #channels of the input semantic map, hence the input dim of SPADE
-class SPADE(nn.Module):
-    def __init__(self, param_free_norm_type, kernel_size, norm_nc, label_nc):
-        super().__init__()
-        if param_free_norm_type == 'instance_norm':
-            self.param_free_norm = nn.InstanceNorm2d(norm_nc, affine=False)
-        elif param_free_norm_type == 'batch_norm':
-            self.param_free_norm = nn.BatchNorm2d(norm_nc, affine=False)
-        else:
-            raise ValueError('%s is not a recognized param-free norm type in SPADE'
-                             % param_free_norm_type)
-
-        # The dimension of the intermediate embedding space. Yes, hardcoded.
-        nhidden = 128
-        # nhidden = 64
-
-        pw = kernel_size // 2
-        self.mlp_shared = nn.Sequential(
-            nn.Conv2d(label_nc, nhidden, kernel_size=kernel_size, padding=pw),
-            nn.ReLU()
-        )
-        self.mlp_gamma = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
-        self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
-
-    def forward(self, x, segmap):
-
-        # Part 1. generate parameter-free normalized activations
-        normalized = self.param_free_norm(x)
-
-        # Part 2. produce scaling and bias conditioned on semantic map
-        segmap = nn.functional.interpolate(segmap, size=x.size()[2:], mode='nearest')
-        actv = self.mlp_shared(segmap)
-        gamma = self.mlp_gamma(actv)
-        beta = self.mlp_beta(actv)
-
-        # apply scale and bias
-        out = normalized * (1 + gamma) + beta
-        # out = x * (1 + gamma) + beta
-
-        return out
+# Miscellaneous:
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv2d') != -1:
+        m.weight.data.normal_(0.0, 0.02)
+    elif classname.find('Norm') != -1:
+        if m.affine == True:
+            m.weight.data.normal_(1.0, 0.02)
+            m.bias.data.fill_(0)
