@@ -390,10 +390,9 @@ def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, 
 
 def adversarial_generative_train(netG, netD, Gs, from_scales, opt, real_segmap=None):
     # train with fake
-    fake = generate_image(netG, from_scales[opt.curr_scale], Gs, from_scales, real_segmap, opt)
     real = from_scales[opt.curr_scale]
-    # prev = concat_pyramid(Gs, from_scales, opt)
-    # fake = netG(curr, prev, real_segmap)
+    prev = concat_pyramid(Gs, from_scales, opt)
+    fake = netG(real, prev, real_segmap)
     output = netD(fake)
     err_adv = -1 * opt.lambda_adversarial * output.mean()
     err_adv.backward(retain_graph=True)
@@ -493,16 +492,10 @@ def concat_pyramid(Gs, sources, opt):
             G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
     return G_z.detach()
 
-def generate_image(netG, curr_images, Gs, scales, cond_image, opt, grad_on_generator=True):
-    fake_images = None
+def generate_image(netG, curr_images, Gs, scales, cond_image, opt):
     with torch.no_grad():
         prevs = concat_pyramid(Gs, scales, opt)
-        if grad_on_generator:
-            fake_images = netG(curr_images, prevs, cond_image)
-
-    # out of no_grad() context!
-    if not grad_on_generator:
-        fake_images = netG(curr_images, prevs, cond_image)
+    fake_images = netG(curr_images, prevs, cond_image)
 
     return fake_images
 

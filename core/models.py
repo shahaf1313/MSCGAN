@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from core.constants import NUM_CLASSES, H, W
 import numpy as np
-
+import torchvision
 
 # Blocks:
 class ConvBlock(nn.Sequential):
