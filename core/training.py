@@ -140,7 +140,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         optimizerSemseg = None
 
     batch_size = opt.source_loaders[opt.curr_scale].batch_size
-    opt.save_pics_rate = np.maximum(2, int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size / opt.pics_per_epoch))
+    opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
     opt.vgg_criterion = VGGLoss()
     total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size)
     start = time.time()
@@ -159,6 +159,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         opt.warmup = epoch_num <= opt.warmup_epochs
         if opt.last_scale and opt.warmup:
             print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
+        opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch*20, batch_size, opt) if epoch_num == 1 else set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
 
         for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
             if steps > total_steps_per_scale:
@@ -602,3 +603,6 @@ def calculte_validation_accuracy(semseg_net, target_val_loader, epoch_num, opt):
 
         running_metrics_val.reset()
     return iou, miou, cm
+
+def set_pics_save_rate(pics_per_epoch, batch_size, opt):
+    return np.maximum(2, int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size / pics_per_epoch))
