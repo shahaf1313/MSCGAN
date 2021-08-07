@@ -26,7 +26,8 @@ def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label
                                         batch_size=opt.batch_size,
                                         shuffle=True,
                                         num_workers=opt.num_workers,
-                                        pin_memory=True)
+                                        pin_memory=True,
+                                        drop_last=True)
     return source_dataloader
 
 
@@ -45,13 +46,15 @@ def CreateTrgDataLoader(opt, set='train', get_image_label=False, get_scales_pyra
                                             batch_size=opt.batch_size,
                                             shuffle=True,
                                             num_workers=opt.num_workers,
-                                            pin_memory=True)
+                                            pin_memory=True,
+                                            drop_last=True)
     elif set == 'val' or set == 'test':
         target_dataloader = data.DataLoader(target_dataset,
                                             batch_size=opt.batch_size,
                                             shuffle=True,
                                             num_workers=opt.num_workers,
-                                            pin_memory=True)
+                                            pin_memory=True,
+                                            drop_last=True)
     else:
         raise Exception("Argument set has not entered properly. Options are train or eval.")
 

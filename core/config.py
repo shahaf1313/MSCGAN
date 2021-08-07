@@ -38,6 +38,7 @@ def get_arguments():
     parser.add_argument('--use_fcc', default=False, action='store_true', help='Uses FC and Convolutional discriminator and generator')
     parser.add_argument('--use_fcc_d', default=False, action='store_true', help='Uses FC and Convolutional discriminator')
     parser.add_argument('--use_fcc_g', default=False, action='store_true', help='Uses FC and Convolutional generator')
+    parser.add_argument('--use_rad', default=False, action='store_true', help='Uses RAD conditional in generator')
     parser.add_argument('--pool_type', type=str, default='avg', help='Determines pooling type in the FCC discriminator (max for max pool, avg for average pool')
     parser.add_argument('--nfc', type=int, default=8)
     parser.add_argument('--ker_size', type=int, help='kernel size', default=3)
@@ -65,7 +66,7 @@ def get_arguments():
     parser.add_argument('--lambda_grad', type=float, help='gradient penelty weight', default=0.1)
     parser.add_argument('--lambda_adversarial', type=float, help='adversarial loss weight', default=1)
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
-    parser.add_argument('--dont_normalize_spade', default=False, action='store_true', help='Chooses whether to normalize or not tha batch begore using spade normalization')
+    parser.add_argument('--lambda_vgg', type=float, help='vgg loss weight', default=1)
 
     # Semseg network parameters:
     parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLab and VGG")

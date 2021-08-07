@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from core.constants import NUM_CLASSES, H, W
 import numpy as np
+import torchvision
 
 
 # Blocks:
@@ -15,12 +16,15 @@ class ConvBlock(nn.Sequential):
         self.add_module('LeakyRelu',nn.LeakyReLU(0.2, inplace=True))
         self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd))
 
-class ConvBlockSpade(nn.Module):
-    def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, activation='lrelu'):
-        super(ConvBlockSpade, self).__init__()
+class CondConvBlock(nn.Module):
+    def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, use_rad, activation='lrelu'):
+        super(CondConvBlock, self).__init__()
         # Normalization:
         self.bn = nn.BatchNorm2d(in_channel)
-        self.spade = SPADE(norm_type, ker_size, in_channel, label_nc=NUM_CLASSES+1) #+1 for don't care label
+        if use_rad:
+            self.cond_norm = RAD(ker_size, in_channel, label_nc=3)
+        else:
+            self.cond_norm = SPADE(norm_type, ker_size, in_channel, label_nc=3)
         # Activation:
         if activation=='lrelu':
             self.actvn = nn.LeakyReLU(0.2)
@@ -33,7 +37,7 @@ class ConvBlockSpade(nn.Module):
             if seg_map==None:
                 z = self.conv(self.actvn(self.bn(x)))
             else:
-                z = self.conv(self.actvn(self.spade(x, seg_map)))
+                z = self.conv(self.actvn(self.cond_norm(x, seg_map)))
             return z
 
 class SPADE(nn.Module):
@@ -92,15 +96,17 @@ class SPADE(nn.Module):
 class RAD(nn.Module):
     def __init__(self, kernel_size, norm_nc, label_nc):
         super(RAD, self).__init__()
-        self.param_free_norm = nn.GroupNorm(num_groups=4, num_channels=norm_nc, affine=False)
+        num_groups = int(1 if norm_nc<10 else norm_nc/4)
+        self.param_free_norm = nn.GroupNorm(num_groups=num_groups, num_channels=norm_nc, affine=False)
         # The dimension of the intermediate embedding space. Yes, hardcoded.
         nhidden = 128
+        # nhidden = 32
 
         pw = kernel_size // 2
         self.mlp_shared = nn.Sequential(
             ResBlockRAD(label_nc, nhidden, kernel_size, pw),
-            ResBlockRAD(nhidden, nhidden, kernel_size, pw),
-            ResBlockRAD(nhidden, nhidden, kernel_size, pw)
+            # ResBlockRAD(nhidden, nhidden, kernel_size, pw),
+            # ResBlockRAD(nhidden, nhidden, kernel_size, pw)
         )
         self.mlp_gamma = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
         self.mlp_beta = nn.Conv2d(nhidden, norm_nc, kernel_size=kernel_size, padding=pw)
@@ -211,33 +217,33 @@ class ConvGenerator(nn.Module):
         # z = z[:,:,ind:(prev_scale.shape[2]-ind),ind:(curr_scale.shape[3]-ind)]
         return z
 
-class LabelConditionedGenerator(nn.Module):
+class ConditionedGenerator(nn.Module):
     def __init__(self, opt):
-        super(LabelConditionedGenerator, self).__init__()
+        super(ConditionedGenerator, self).__init__()
         self.is_initial_scale = opt.curr_scale == 0
         self.use_extended_generator = opt.curr_scale >= opt.num_scales - 1
-        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.head =     CondConvBlock((2 - self.is_initial_scale) * opt.nc_im, opt.base_channels, opt.ker_size, use_rad=opt.use_rad, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_1 =   CondConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, use_rad=opt.use_rad, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_2 =   CondConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, use_rad=opt.use_rad, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_3 =   CondConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, use_rad=opt.use_rad, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_4 =   CondConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, use_rad=opt.use_rad, padd=1, stride=1, norm_type=opt.norm_type)
+        self.body_5 =   CondConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, use_rad=opt.use_rad, padd=1, stride=1, norm_type=opt.norm_type)
+        self.tail =     CondConvBlock(opt.base_channels, opt.nc_im, opt.ker_size, use_rad=opt.use_rad, padd=1, stride=1, norm_type=opt.norm_type)
         self.tail_actvn = nn.Tanh()
-    def forward(self, curr_scale, prev_scale, seg_map=None):
+    def forward(self, source, source_prev, target):
         if self.is_initial_scale:
-            z = curr_scale
+            z = source
         else:
-            z = torch.cat((curr_scale, prev_scale), 1)
+            z = torch.cat((source, source_prev), 1)
 
-        z = self.head(z, seg_map)
-        z = self.body_1(z, seg_map)
-        z = self.body_2(z, seg_map)
-        z = self.body_3(z, seg_map)
+        z = self.head(z, target)
+        z = self.body_1(z, target)
+        z = self.body_2(z, target)
+        z = self.body_3(z, target)
         if self.use_extended_generator:
-            z = self.body_4(z, seg_map)
-            z = self.body_5(z, seg_map)
-        z = self.tail(z, seg_map)
+            z = self.body_4(z, target)
+            z = self.body_5(z, target)
+        z = self.tail(z, target)
         z = self.tail_actvn(z)
         return z
 
@@ -428,30 +434,30 @@ class FCCGenerator(nn.Module):
         self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
 
         # Down Conv:
-        self.conv_1_down = ConvBlockSpade(opt.nc_im,
-                                     self.embedding_channels_size//4,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_1_down = CondConvBlock(opt.nc_im,
+                                         self.embedding_channels_size // 4,
+                                         opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//4,
-                                     self.embedding_channels_size//2,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_2_down = CondConvBlock(self.embedding_channels_size // 4,
+                                         self.embedding_channels_size // 2,
+                                         opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        self.conv_3_down = ConvBlockSpade(self.embedding_channels_size//2,
-                                     self.embedding_channels_size,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_3_down = CondConvBlock(self.embedding_channels_size // 2,
+                                         self.embedding_channels_size,
+                                         opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
         # Up Conv:
-        self.conv_1_up = ConvBlockSpade(self.embedding_channels_size,
-                                          self.embedding_channels_size//2,
-                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_1_up = CondConvBlock(self.embedding_channels_size,
+                                       self.embedding_channels_size // 2,
+                                       opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        self.conv_2_up = ConvBlockSpade(self.embedding_channels_size//2,
-                                          self.embedding_channels_size//4,
-                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_2_up = CondConvBlock(self.embedding_channels_size // 2,
+                                       self.embedding_channels_size // 4,
+                                       opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        self.conv_3_up = ConvBlockSpade(self.embedding_channels_size//4,
-                                          opt.nc_im,
-                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_3_up = CondConvBlock(self.embedding_channels_size // 4,
+                                       opt.nc_im,
+                                       opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
         # Down FC:
         self.fc_1_down = nn.Sequential(nn.BatchNorm1d(self.embedding_size),
@@ -576,17 +582,17 @@ class FCCDiscriminator(nn.Module):
         assert H == W/2
         self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
 
-        self.conv_1 = ConvBlockSpade(opt.nc_im,
-                                     self.embedding_channels_size//4,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_1 = CondConvBlock(opt.nc_im,
+                                    self.embedding_channels_size // 4,
+                                    opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        self.conv_2 = ConvBlockSpade(self.embedding_channels_size//4,
-                                     self.embedding_channels_size//2,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_2 = CondConvBlock(self.embedding_channels_size // 4,
+                                    self.embedding_channels_size // 2,
+                                    opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
-        self.conv_3 = ConvBlockSpade(self.embedding_channels_size//2,
-                                     self.embedding_channels_size,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        self.conv_3 = CondConvBlock(self.embedding_channels_size // 2,
+                                    self.embedding_channels_size,
+                                    opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
 
         self.fc_1 = nn.Sequential(nn.BatchNorm1d(self.embedding_size),
                                   nn.LeakyReLU(0.2),
@@ -622,3 +628,57 @@ def weights_init(m):
         if m.affine == True:
             m.weight.data.normal_(1.0, 0.02)
             m.bias.data.fill_(0)
+
+# VGG architecture, used for the perceptual loss using a pretrained VGG network
+class VGG19(torch.nn.Module):
+    def __init__(self, requires_grad=False):
+        super().__init__()
+        vgg_pretrained_features = torchvision.models.vgg19(pretrained=True).features
+        self.slice1 = torch.nn.Sequential()
+        self.slice2 = torch.nn.Sequential()
+        self.slice3 = torch.nn.Sequential()
+        self.slice4 = torch.nn.Sequential()
+        self.slice5 = torch.nn.Sequential()
+        for x in range(2):
+            self.slice1.add_module(str(x), vgg_pretrained_features[x])
+        for x in range(2, 7):
+            self.slice2.add_module(str(x), vgg_pretrained_features[x])
+        for x in range(7, 12):
+            self.slice3.add_module(str(x), vgg_pretrained_features[x])
+        for x in range(12, 21):
+            self.slice4.add_module(str(x), vgg_pretrained_features[x])
+        for x in range(21, 30):
+            self.slice5.add_module(str(x), vgg_pretrained_features[x])
+        if not requires_grad:
+            for param in self.parameters():
+                param.requires_grad = False
+
+    def forward(self, X):
+        h_relu1 = self.slice1(X)
+        h_relu2 = self.slice2(h_relu1)
+        h_relu3 = self.slice3(h_relu2)
+        h_relu4 = self.slice4(h_relu3)
+        h_relu5 = self.slice5(h_relu4)
+        out = [h_relu1, h_relu2, h_relu3, h_relu4, h_relu5]
+        return out
+
+# Perceptual loss that uses a pretrained VGG network
+class VGGLoss(nn.Module):
+    def __init__(self):
+        super(VGGLoss, self).__init__()
+        self.vgg = VGG19().cuda()
+        self.criterion = nn.L1Loss()
+        self.weights = [1.0 / 32, 1.0 / 16, 1.0 / 8, 1.0 / 4, 1.0]
+
+    def forward(self, x, y):
+        x_vgg, y_vgg = self.vgg(x), self.vgg(y)
+        loss = 0
+        for i in range(len(x_vgg)):
+            loss += self.weights[i] * self.criterion(x_vgg[i], y_vgg[i])
+        return loss
+
+
+# KL Divergence loss used in VAE with an image encoder
+class KLDLoss(nn.Module):
+    def forward(self, mu, logvar):
+        return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
