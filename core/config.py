@@ -65,6 +65,7 @@ def get_arguments():
     parser.add_argument('--lambda_grad', type=float, help='gradient penelty weight', default=0.1)
     parser.add_argument('--lambda_adversarial', type=float, help='adversarial loss weight', default=1)
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
+    parser.add_argument('--lambda_vgg', type=float, help='VGG perceptual loss weight', default=1)
     parser.add_argument('--dont_normalize_spade', default=False, action='store_true', help='Chooses whether to normalize or not tha batch begore using spade normalization')
 
     # Semseg network parameters:

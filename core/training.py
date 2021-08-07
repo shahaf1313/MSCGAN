@@ -7,6 +7,7 @@ from core.constants import MAX_CHANNELS_PER_LAYER, NUM_CLASSES, IGNORE_LABEL, BE
 from core.sync_batchnorm import convert_model
 from semseg_models import CreateSemsegModel
 import numpy as np
+from core.models import VGGLoss
 import time
 from core.constants import H, W
 from core.functions import imresize_torch, colorize_mask, reset_grads, save_networks, calc_gradient_penalty, GeneratePyramid, one_hot_encoder, compute_iou_torch, \
@@ -140,6 +141,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
     batch_size = opt.source_loaders[opt.curr_scale].batch_size
     opt.save_pics_rate = np.maximum(2, int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size / opt.pics_per_epoch))
+    opt.vgg_criterion = VGGLoss()
     total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size)
     start = time.time()
     discriminator_steps = 0
@@ -382,13 +384,17 @@ def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, 
 
 def adversarial_generative_train(netG, netD, Gs, from_scales, opt, real_segmap=None):
     # train with fake
-    curr = from_scales[opt.curr_scale]
-    prev = concat_pyramid(Gs, from_scales, opt)
-    fake = netG(curr, prev, real_segmap)
+    fake = generate_image(netG, from_scales[opt.curr_scale], Gs, from_scales, real_segmap, opt)
+    real = from_scales[opt.curr_scale]
+    # prev = concat_pyramid(Gs, from_scales, opt)
+    # fake = netG(curr, prev, real_segmap)
     output = netD(fake)
-    errG = -1 * opt.lambda_adversarial * output.mean()
-    errG.backward()
-    return errG
+    err_adv = -1 * opt.lambda_adversarial * output.mean()
+    err_adv.backward(retain_graph=True)
+    err_vgg = opt.vgg_criterion(fake, real) * opt.lambda_vgg
+    err_vgg.backward()
+
+    return err_adv, err_vgg
 
 
 def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
