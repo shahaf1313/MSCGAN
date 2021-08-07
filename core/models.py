@@ -99,8 +99,8 @@ class RAD(nn.Module):
         num_groups = int(1 if norm_nc<10 else norm_nc/4)
         self.param_free_norm = nn.GroupNorm(num_groups=num_groups, num_channels=norm_nc, affine=False)
         # The dimension of the intermediate embedding space. Yes, hardcoded.
-        nhidden = 128
-        # nhidden = 32
+        # nhidden = 128
+        nhidden = 32
 
         pw = kernel_size // 2
         self.mlp_shared = nn.Sequential(
