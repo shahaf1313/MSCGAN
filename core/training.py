@@ -159,7 +159,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         opt.warmup = epoch_num <= opt.warmup_epochs
         if opt.last_scale and opt.warmup:
             print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
-        opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch*20, batch_size, opt) if epoch_num == 1 else set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
+        opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch*10, batch_size, opt) if epoch_num == 1 else set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
 
         for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
             if steps > total_steps_per_scale:
@@ -280,7 +280,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             ###########################
             if opt.last_scale:
                 optimizerSemseg.zero_grad()
-                optimizerGst.zero_grad()
+                if not opt.warmup:
+                    optimizerGst.zero_grad()
                 # Train semseg on GTA5 image converted to CS, using GTA5 labels:
                 semseg_softs_syn, semseg_labels_syn, semseg_loss_syn = synthetic_semantic_segmentation_loss(source_scales, Gst, netGst, semseg_cs, source_label, opt)
                 opt.tb.add_scalar('Semseg/SemsegCsLoss', semseg_loss_syn.item(), semseg_steps)
@@ -293,7 +294,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     semseg_total_loss += semseg_loss_real.item()
                 opt.tb.add_scalar('Semseg/SemsegLoss', semseg_total_loss, semseg_steps)
                 optimizerSemseg.step()
-                optimizerGst.step()
+                if not opt.warmup:
+                    optimizerGst.step()
                 semseg_steps += 1
 
             if int(steps / opt.print_rate) >= print_int or steps == 0:
