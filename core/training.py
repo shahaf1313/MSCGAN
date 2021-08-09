@@ -239,14 +239,14 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     optimizerSemsegGen.zero_grad()
 
                 # S -> T:
-                loss_adv, loss_vgg = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_segmap=source_segmap)
+                loss_adv, loss_vgg = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_target_batch=target_scales[-1], source_segmap=source_segmap)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial + loss_vgg / opt.lambda_vgg, generator_steps)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorAdversarialLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial, generator_steps)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorVGGLoss' % opt.curr_scale, loss_vgg / opt.lambda_vgg, generator_steps)
 
                 # T -> S:
                 target_segmap = encode_semseg_out(semseg_cs(target_scales[-1]), opt.ignore_threshold) if opt.use_semseg_generation_training and opt.last_scale and not opt.warmup else None
-                loss_adv, loss_vgg = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt, real_segmap=target_segmap)
+                loss_adv, loss_vgg = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt, real_target_batch=source_scales[-1], source_segmap=target_segmap)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial + loss_vgg / opt.lambda_vgg, generator_steps)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorAdversarialLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial, generator_steps)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorVGGLoss' % opt.curr_scale, loss_vgg / opt.lambda_vgg, generator_steps)
@@ -391,15 +391,15 @@ def adversarial_disciriminative_train(netD, netG, Gs, real_images, from_scales, 
 
     return D_x, D_G_z, errD
 
-def adversarial_generative_train(netG, netD, Gs, from_scales, opt, real_segmap=None):
+def adversarial_generative_train(netG, netD, Gs, source_scales, opt, real_target_batch, source_segmap=None):
     # train with fake
-    real = from_scales[opt.curr_scale]
-    prev = concat_pyramid(Gs, from_scales, opt)
-    fake = netG(real, prev, real_segmap)
-    output = netD(fake)
+    fake_target_image = generate_image(netG, source_scales[opt.curr_scale], Gs, source_scales, source_segmap, opt)
+    # prev = concat_pyramid(Gs, from_scales, opt)
+    # fake = netG(curr, prev, real_segmap)
+    output = netD(fake_target_image)
     err_adv = -1 * opt.lambda_adversarial * output.mean()
     err_adv.backward(retain_graph=True)
-    err_vgg = opt.vgg_criterion(fake, real) * opt.lambda_vgg
+    err_vgg = opt.vgg_criterion(fake_target_image, real_target_batch) * opt.lambda_vgg
     err_vgg.backward()
 
     return err_adv, err_vgg
