@@ -33,11 +33,11 @@ class CondConvBlock(nn.Module):
         # Convolution:
         self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
 
-    def forward(self, x, seg_map=None):
-            if seg_map==None:
-                z = self.conv(self.actvn(self.bn(x)))
+    def forward(self, input_image, cond_image=None):
+            if cond_image==None:
+                z = self.conv(self.actvn(self.bn(input_image)))
             else:
-                z = self.conv(self.actvn(self.cond_norm(x, seg_map)))
+                z = self.conv(self.actvn(self.cond_norm(input_image, cond_image)))
             return z
 
 class SPADE(nn.Module):
