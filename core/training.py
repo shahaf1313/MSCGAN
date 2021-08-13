@@ -159,7 +159,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         opt.warmup = epoch_num <= opt.warmup_epochs
         if opt.last_scale and opt.warmup:
             print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
-        opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch*2, batch_size, opt) if epoch_num == 1 else set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
+        # opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch*2, batch_size, opt) if epoch_num == 1 else set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
 
         for batch_num, ((source_scales, source_label), target_scales) in enumerate(zip(opt.source_loaders[opt.curr_scale], opt.target_loaders[opt.curr_scale])):
             if steps > total_steps_per_scale:
