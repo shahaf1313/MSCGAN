@@ -239,14 +239,14 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     optimizerSemsegGen.zero_grad()
 
                 # S -> T:
-                loss_adv, loss_vgg = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_target_batch=target_scales[-1], source_segmap=source_segmap)
+                loss_adv, loss_vgg = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_target_batch=target_scales[-1] if not opt.warmup else source_scales[-1], source_segmap=source_segmap)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial + loss_vgg / opt.lambda_vgg, generator_steps)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorAdversarialLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial, generator_steps)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorVGGLoss' % opt.curr_scale, loss_vgg / opt.lambda_vgg, generator_steps)
 
                 # T -> S:
                 target_segmap = encode_semseg_out(semseg_cs(target_scales[-1]), opt.ignore_threshold) if opt.use_semseg_generation_training and opt.last_scale and not opt.warmup else None
-                loss_adv, loss_vgg = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt, real_target_batch=source_scales[-1], source_segmap=target_segmap)
+                loss_adv, loss_vgg = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt, real_target_batch=source_scales[-1] if not opt.warmup else target_scales[-1], source_segmap=target_segmap)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial + loss_vgg / opt.lambda_vgg, generator_steps)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorAdversarialLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial, generator_steps)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorVGGLoss' % opt.curr_scale, loss_vgg / opt.lambda_vgg, generator_steps)
