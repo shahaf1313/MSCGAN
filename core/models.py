@@ -33,19 +33,28 @@ class ConvBlockSpade(nn.Module):
         else: #don't normalize only in the head module, where you have only 3 channels..
             self.norm  = None
             self.spade = None
+        # todo: delete after training @ Yann finishes:
+        self.bn = self.norm
         # Activation:
         self.actvn = nn.LeakyReLU(0.2)
         # Convolution:
         self.conv = nn.Conv2d(in_channel, out_channel, kernel_size=ker_size, stride=stride, padding=padd)
 
     def forward(self, x, seg_map=None):
+        # todo: delete after training @ Yann finishes:
+        if hasattr(self, 'norm'):
             if self.norm==None: #Don't use norm layer:
                 z = self.actvn(self.conv(x))
             elif seg_map==None:
                 z = self.conv(self.actvn(self.norm(x)))
             else:
                 z = self.conv(self.actvn(self.spade(x, seg_map)))
-            return z
+        else:
+            if seg_map==None:
+                z = self.conv(self.actvn(self.bn(x)))
+            else:
+                z = self.conv(self.actvn(self.spade(x, seg_map)))
+        return z
 
 class SPADE(nn.Module):
     # # Creates SPADE normalization layer based on the given configuration

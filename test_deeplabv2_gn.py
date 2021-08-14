@@ -5,7 +5,7 @@ def main(opt):
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
-    opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, opt.batch_size_list[0], opt)
+    opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, opt.batch_size, opt)
     opt.force_bn_in_deeplab = not opt.use_gn_in_semseg
     opt.force_gn_in_deeplab = opt.use_gn_in_semseg
     opt.norm_type = 'GN' if opt.use_gn_in_semseg else 'BN'

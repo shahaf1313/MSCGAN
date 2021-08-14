@@ -151,4 +151,7 @@ def post_config(opt):
         np.random.RandomState(opt.manualSeed)
         np.random.seed(opt.manualSeed)
 
+        opt.force_bn_in_deeplab = False
+        opt.force_gn_in_deeplab = False
+
         return opt
