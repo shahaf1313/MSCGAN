@@ -17,7 +17,10 @@ def CreateSemsegModel(args):
         optimizer.zero_grad()
 
     if args.model == 'DeepLabV2':
-        model = DeeplabV2(nn.BatchNorm2d, num_classes=NUM_CLASSES)
+        if args.images_per_gpu[args.curr_scale] > 16 or args.force_bn_in_deeplab:
+            model = DeeplabV2(BatchNorm=True, num_classes=NUM_CLASSES)
+        elif args.images_per_gpu[args.curr_scale] <= 16 or args.force_gn_in_deeplab:
+            model = DeeplabV2(BatchNorm=False, num_classes=NUM_CLASSES)
         optimizer = optim.SGD(model.optim_parameters(args),
                               lr=args.lr_semseg, momentum=args.momentum, weight_decay=args.weight_decay)
         optimizer.zero_grad()

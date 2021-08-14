@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
 from data.labels_info import trainId2label
-from core.constants import MAX_CHANNELS_PER_LAYER, NUM_CLASSES, IGNORE_LABEL, BEST_MIOU
+from core.constants import NUM_CLASSES, IGNORE_LABEL, BEST_MIOU
 from core.sync_batchnorm import convert_model
 from semseg_models import CreateSemsegModel
 import numpy as np
@@ -47,7 +47,8 @@ def train(opt):
     while scale_num < opt.num_scales + 1:
         opt.curr_scale = scale_num
         opt.last_scale = opt.curr_scale == opt.num_scales
-        opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale + 1) / 2)))))
+        # opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale + 1) / 2)))))
+        opt.base_channels = opt.nfc*16*(opt.curr_scale+1)
         opt.outf = '%s/%d' % (opt.out_, scale_num)
         try:
             os.makedirs(opt.outf)
@@ -70,30 +71,19 @@ def train(opt):
             else:
                 semseg_cs = None
 
-        # #add networks to GracefulExit:
-        # graceful_exit.Gst.append(Gst_curr)
-        # graceful_exit.Gts.append(Gts_curr)
-        # graceful_exit.Dst.append(Dst_curr)
-        # graceful_exit.Dts.append(Dts_curr)
-        # if opt.last_scale: #Last scale, save semseg network:
-        #     graceful_exit.semseg_cs = semseg_cs
-
-        # todo: implement DistributedDataParallel using the tutorial form pytorch's website!
-        if len(opt.gpus) > 1:  # Use data parallel and SyncBatchNorm
-            Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr)).to(opt.device), convert_model(nn.DataParallel(Gst_curr)).to(opt.device)
-            Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr)).to(opt.device), convert_model(nn.DataParallel(Gts_curr)).to(opt.device)
-            if opt.last_scale:  # Last scale, convert also the semseg network to DP+SBN:
-                semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
-
-            # Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gst_curr, device_ids=opt.gpus)).to(opt.device)
-            # Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr, device_ids=opt.gpus)).to(opt.device), convert_model(nn.DataParallel(Gts_curr, device_ids=opt.gpus)).to(opt.device)
-            # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
+        if len(opt.gpus) > 1:
+            # todo: This code section initializes a SyncBN model. It utilizes more memory but gives better results:
+            # Use data parallel and SyncBatchNorm
+            # Dst_curr, Gst_curr = convert_model(nn.DataParallel(Dst_curr)).to(opt.device), convert_model(nn.DataParallel(Gst_curr)).to(opt.device)
+            # Dts_curr, Gts_curr = convert_model(nn.DataParallel(Dts_curr)).to(opt.device), convert_model(nn.DataParallel(Gts_curr)).to(opt.device)
+            # if opt.last_scale:  # Last scale, convert also the semseg network to DP+SBN:
             #     semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
 
-            # Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
-            # Dts_curr, Gts_curr = nn.DataParallel(Dts_curr, device_ids=opt.gpus), nn.DataParallel(Gts_curr, device_ids=opt.gpus)
-            # if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
-            #     semseg_cs = nn.DataParallel(semseg_cs, device_ids=opt.gpus)
+            # todo: for now, decided to use GroupNorm instead of BN, so not using sync BN!
+            Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
+            Dts_curr, Gts_curr = nn.DataParallel(Dts_curr, device_ids=opt.gpus), nn.DataParallel(Gts_curr, device_ids=opt.gpus)
+            if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
+                semseg_cs = nn.DataParallel(semseg_cs, device_ids=opt.gpus)
 
         print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
         if opt.last_scale:  # Last scale, print semseg network:
@@ -153,6 +143,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     print_int = 0 if not resume else int(steps / opt.print_rate)
     save_pics_int = 0
     keep_training = True
+    opt.vgg_warmup = opt.warmup if not opt.last_scale else opt.warmup//2
 
     while keep_training:
         print('scale %d: starting epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.epochs_per_scale))
@@ -239,14 +230,14 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     optimizerSemsegGen.zero_grad()
 
                 # S -> T:
-                loss_adv, loss_vgg = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_target_batch=target_scales[-1] if not opt.warmup else source_scales[-1], source_segmap=source_segmap)
+                loss_adv, loss_vgg = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt, real_target_batch=target_scales[-1] if not opt.vgg_warmup else source_scales[-1], source_segmap=source_segmap)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial + loss_vgg / opt.lambda_vgg, generator_steps)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorAdversarialLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial, generator_steps)
                 opt.tb.add_scalar('Scale%d/ST/GeneratorVGGLoss' % opt.curr_scale, loss_vgg / opt.lambda_vgg, generator_steps)
 
                 # T -> S:
                 target_segmap = encode_semseg_out(semseg_cs(target_scales[-1]), opt.ignore_threshold) if opt.use_semseg_generation_training and opt.last_scale and not opt.warmup else None
-                loss_adv, loss_vgg = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt, real_target_batch=source_scales[-1] if not opt.warmup else target_scales[-1], source_segmap=target_segmap)
+                loss_adv, loss_vgg = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt, real_target_batch=source_scales[-1] if not opt.vgg_warmup else target_scales[-1], source_segmap=target_segmap)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial + loss_vgg / opt.lambda_vgg, generator_steps)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorAdversarialLoss' % opt.curr_scale, loss_adv / opt.lambda_adversarial, generator_steps)
                 opt.tb.add_scalar('Scale%d/TS/GeneratorVGGLoss' % opt.curr_scale, loss_vgg / opt.lambda_vgg, generator_steps)
@@ -504,6 +495,7 @@ def generate_image(netG, curr_images, Gs, scales, cond_image, opt):
 
 def init_models(opt):
     use_four_level_net = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H, W) / 16 > opt.ker_size
+
     # generator initialization:
     if opt.use_unet_generator:
         # use_four_level_unet = np.power(opt.scale_factor, opt.num_scales - opt.curr_scale) * np.minimum(H,W) / 16 > opt.ker_size

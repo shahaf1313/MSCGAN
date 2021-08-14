@@ -31,7 +31,6 @@ def get_arguments():
     # networks parameters:
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--batch_size_list', type=int, nargs='+', help="batch size in each one of the scales", default=[0])
-    parser.add_argument('--norm_type', type=str, default='batch_norm')
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs before switching to label conditioned generator.')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
@@ -39,7 +38,7 @@ def get_arguments():
     parser.add_argument('--use_fcc_d', default=False, action='store_true', help='Uses FC and Convolutional discriminator')
     parser.add_argument('--use_fcc_g', default=False, action='store_true', help='Uses FC and Convolutional generator')
     parser.add_argument('--pool_type', type=str, default='avg', help='Determines pooling type in the FCC discriminator (max for max pool, avg for average pool')
-    parser.add_argument('--nfc', type=int, default=8)
+    parser.add_argument('--nfc', type=int, default=1, help='Number of filter channels. The smallest scale will have nfc*16 channels. Each scales number of channels increases by 16. Default: 1')
     parser.add_argument('--ker_size', type=int, help='kernel size', default=3)
     parser.add_argument('--num_layer', type=int, help='number of layers', default=5)
     parser.add_argument('--stride', help='stride', default=1)
@@ -66,7 +65,6 @@ def get_arguments():
     parser.add_argument('--lambda_adversarial', type=float, help='adversarial loss weight', default=1)
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
     parser.add_argument('--lambda_vgg', type=float, help='VGG perceptual loss weight', default=1)
-    parser.add_argument('--dont_normalize_spade', default=False, action='store_true', help='Chooses whether to normalize or not tha batch begore using spade normalization')
 
     # Semseg network parameters:
     parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLab and VGG")
@@ -136,6 +134,7 @@ def post_config(opt):
 
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(opt.gpus)[1:-1].strip(' ').replace(" ", "")
+        opt.images_per_gpu = [int(batch_size / len(opt.gpus)) for batch_size in opt.batch_size_list]
         opt.logger = Logger(os.path.join(opt.out_, 'log.txt'))
         sys.stdout = opt.logger
 

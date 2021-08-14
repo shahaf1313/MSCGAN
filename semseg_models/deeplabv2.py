@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 import torch
+import numpy as np
 from core.sync_batchnorm.batchnorm import SynchronizedBatchNorm2d
 from core.constants import IGNORE_LABEL
 affine_par = True
@@ -10,18 +11,29 @@ affine_par = True
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, stride=1, dilation=1, downsample=None, BatchNorm=None):
+    def __init__(self, inplanes, planes, stride=1, dilation=1, downsample=None, BatchNorm=True):
         super(Bottleneck, self).__init__()
+        groups_per_layer = int(np.minimum(32, planes/16))
+        groups_per_last_layer = int(np.minimum(32, 4*planes/16))
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, stride=stride, bias=False)  # change
-        self.bn1 = BatchNorm(planes, affine=affine_par)
+        if BatchNorm:
+            self.bn1 = nn.BatchNorm2d(planes, affine=affine_par)
+        else:
+            self.bn1 = nn.GroupNorm(groups_per_layer, planes, affine=affine_par)
 
         padding = dilation
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1,  # change
                                padding=padding, bias=False, dilation=dilation)
-        self.bn2 = BatchNorm(planes, affine=affine_par)
+        if BatchNorm:
+            self.bn2 = nn.BatchNorm2d(planes, affine=affine_par)
+        else:
+            self.bn2 = nn.GroupNorm(groups_per_layer, planes, affine=affine_par)
 
         self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
-        self.bn3 = BatchNorm(planes * 4, affine=affine_par)
+        if BatchNorm:
+            self.bn3 = nn.BatchNorm2d(4*planes, affine=affine_par)
+        else:
+            self.bn3 = nn.GroupNorm(groups_per_last_layer, 4*planes, affine=affine_par)
 
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
@@ -162,7 +174,11 @@ class ResNet101(nn.Module):
         super(ResNet101, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
-        self.bn1 = BatchNorm(64, affine=affine_par)
+        if BatchNorm:
+            self.bn1 = nn.BatchNorm2d(64, affine=affine_par)
+        else:
+            self.bn1 = nn.GroupNorm(4, 64, affine=affine_par)
+
 
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1, ceil_mode=True)  # change
@@ -173,7 +189,10 @@ class ResNet101(nn.Module):
         #self.layer5 = self._make_pred_layer(Classifier_Module, 2048, [6, 12, 18, 24], [6, 12, 18, 24], num_classes)
         self.layer5 = self._make_pred_layer(Classifier_Module2, 2048, [6, 12, 18, 24], [6, 12, 18, 24], num_classes)
         if self.bn_clr:
-            self.bn_pretrain = BatchNorm(2048, affine=affine_par)
+            if BatchNorm:
+                self.bn_pretrain = nn.BatchNorm2d(2048, affine=affine_par)
+            else:
+                self.bn_pretrain = nn.GroupNorm(32, 2048, affine=affine_par)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -185,14 +204,22 @@ class ResNet101(nn.Module):
             elif isinstance(m, SynchronizedBatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
+            elif isinstance(m, nn.GroupNorm):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
 
-    def _make_layer(self, block, planes, blocks, stride=1, dilation=1, BatchNorm=None):
+    def _make_layer(self, block, planes, blocks, stride=1, dilation=1, BatchNorm=True):
         downsample = None
+        groups_per_layer = int(np.minimum(32, planes * block.expansion/16))
+        if BatchNorm:
+            norm = nn.BatchNorm2d(planes * block.expansion, affine=affine_par)
+        else:
+            norm = nn.GroupNorm(groups_per_layer, planes * block.expansion, affine=affine_par)
+
         if stride != 1 or self.inplanes != planes * block.expansion or dilation == 2 or dilation == 4:
             downsample = nn.Sequential(
-                nn.Conv2d(self.inplanes, planes * block.expansion,
-                          kernel_size=1, stride=stride, bias=False),
-                BatchNorm(planes * block.expansion, affine=affine_par))
+                nn.Conv2d(self.inplanes, planes * block.expansion, kernel_size=1, stride=stride, bias=False),
+                norm)
 
         layers = []
         layers.append(block(self.inplanes, planes, stride, dilation=dilation, downsample=downsample, BatchNorm=BatchNorm))
@@ -306,7 +333,12 @@ def DeeplabV2(BatchNorm, num_classes=21, freeze_bn=False, restore_from=None, ini
     state_dict = model.state_dict()
     for k, v in pretrain_dict.items():
         if k in state_dict:
-            model_dict[k] = v
+            if BatchNorm:
+                model_dict[k] = v
+            else:
+                if isinstance(k, nn.BatchNorm2d):
+                    print('passed:', k)
+                    pass
     state_dict.update(model_dict)
     model.load_state_dict(state_dict)
 

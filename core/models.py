@@ -6,32 +6,43 @@ import torchvision
 
 # Blocks:
 class ConvBlock(nn.Sequential):
-    def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type):
+    def __init__(self, in_channel, out_channel, ker_size, im_per_gpu, padd=1, stride=1):
         super(ConvBlock,self).__init__()
-        if norm_type == 'batch_norm':
+        if im_per_gpu >= 16:
             self.add_module('norm',nn.BatchNorm2d(in_channel))
-        elif norm_type == 'instance_norm':
-            self.add_module('norm',nn.InstanceNorm2d(in_channel,affine=True))
-        self.add_module('LeakyRelu',nn.LeakyReLU(0.2, inplace=True))
-        self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd))
+        elif im_per_gpu < 16 and in_channel % 4 == 0:
+            self.add_module('norm',nn.GroupNorm(num_groups=4, num_channels=in_channel, affine=True))
+        else: #don't normalize only in the head module, where you have only 3 channels..
+            self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride, padding=padd))
+            self.add_module('lrelu',nn.LeakyReLU(0.2, inplace=True))
+            return
+
+        self.add_module('lrelu',nn.LeakyReLU(0.2, inplace=True))
+        self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride, padding=padd))
 
 class ConvBlockSpade(nn.Module):
-    def __init__(self, in_channel, out_channel, ker_size, padd, stride, norm_type, activation='lrelu'):
+    def __init__(self, in_channel, out_channel, ker_size, im_per_gpu, padd=1, stride=1):
         super(ConvBlockSpade, self).__init__()
         # Normalization:
-        self.bn = nn.BatchNorm2d(in_channel)
-        self.spade = SPADE(norm_type, ker_size, in_channel, label_nc=NUM_CLASSES+1) #+1 for don't care label
+        if im_per_gpu >= 16:
+            self.norm = nn.BatchNorm2d(in_channel)
+            self.spade = SPADE(ker_size, in_channel, use_bn=True, label_nc=NUM_CLASSES+1) #+1 for don't care label
+        elif im_per_gpu < 16 and in_channel % 4 == 0:
+            self.norm = nn.GroupNorm(num_groups=4, num_channels=in_channel, affine=True)
+            self.spade = SPADE(ker_size, in_channel, use_bn=False, label_nc=NUM_CLASSES+1) #+1 for don't care label
+        else: #don't normalize only in the head module, where you have only 3 channels..
+            self.norm  = None
+            self.spade = None
         # Activation:
-        if activation=='lrelu':
-            self.actvn = nn.LeakyReLU(0.2)
-        elif activation=='tanh':
-            self.actvn = nn.Tanh()
+        self.actvn = nn.LeakyReLU(0.2)
         # Convolution:
-        self.conv = nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride,padding=padd)
+        self.conv = nn.Conv2d(in_channel, out_channel, kernel_size=ker_size, stride=stride, padding=padd)
 
     def forward(self, x, seg_map=None):
-            if seg_map==None:
-                z = self.conv(self.actvn(self.bn(x)))
+            if self.norm==None: #Don't use norm layer:
+                z = self.actvn(self.conv(x))
+            elif seg_map==None:
+                z = self.conv(self.actvn(self.norm(x)))
             else:
                 z = self.conv(self.actvn(self.spade(x, seg_map)))
             return z
@@ -50,19 +61,14 @@ class SPADE(nn.Module):
     # Also, the other arguments are
     # |norm_nc|: the #channels of the normalized activations, hence the output dim of SPADE
     # |label_nc|: the #channels of the input semantic map, hence the input dim of SPADE
-    def __init__(self, param_free_norm_type, kernel_size, norm_nc, label_nc):
+    def __init__(self, kernel_size, norm_nc, use_bn, label_nc):
         super().__init__()
-        if param_free_norm_type == 'instance_norm':
-            self.param_free_norm = nn.InstanceNorm2d(norm_nc, affine=False)
-        elif param_free_norm_type == 'batch_norm':
+        if use_bn:
             self.param_free_norm = nn.BatchNorm2d(norm_nc, affine=False)
         else:
-            raise ValueError('%s is not a recognized param-free norm type in SPADE'
-                             % param_free_norm_type)
-
+            self.param_free_norm = nn.GroupNorm(num_groups=4, num_channels=norm_nc, affine=False)
         # The dimension of the intermediate embedding space. Yes, hardcoded.
         nhidden = 128
-        # nhidden = 64
 
         pw = kernel_size // 2
         self.mlp_shared = nn.Sequential(
@@ -187,16 +193,16 @@ class LocalNet(nn.Module):
 class ConvGenerator(nn.Module):
     def __init__(self, opt):
         super(ConvGenerator, self).__init__()
+        self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         self.is_initial_scale = opt.curr_scale == 0
         alpha = 1 if self.is_initial_scale else 0
-        self.head = ConvBlock((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.head = ConvBlock((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu)
         self.body = nn.Sequential()
         for i in range(opt.num_layer-2):
-            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1,  norm_type=opt.norm_type)
+            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu)
             self.body.add_module('block%d'%(i+1),block)
         self.tail = nn.Sequential(
-            nn.Conv2d(opt.base_channels, opt.nc_im, kernel_size=opt.ker_size, stride=1, padding=1),
-            nn.BatchNorm2d(opt.nc_im), #todo: I added, see what is happening
+            ConvBlock(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu),
             nn.Tanh()
         )
     def forward(self, curr_scale, prev_scale, label=None):
@@ -207,22 +213,21 @@ class ConvGenerator(nn.Module):
         z = self.head(z)
         z = self.body(z)
         z = self.tail(z)
-        # ind = int((prev_scale.shape[2]-curr_scale.shape[2])/2)
-        # z = z[:,:,ind:(prev_scale.shape[2]-ind),ind:(curr_scale.shape[3]-ind)]
         return z
 
 class LabelConditionedGenerator(nn.Module):
     def __init__(self, opt):
         super(LabelConditionedGenerator, self).__init__()
+        self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         self.is_initial_scale = opt.curr_scale == 0
         self.use_extended_generator = opt.curr_scale >= opt.num_scales - 1
-        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
-        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu)
+        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu)
+        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu)
+        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu)
+        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu)
+        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu)
+        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu)
         self.tail_actvn = nn.Tanh()
     def forward(self, curr_scale, prev_scale, seg_map=None):
         if self.is_initial_scale:
@@ -502,14 +507,14 @@ class FCCGenerator(nn.Module):
 class WDiscriminator(nn.Module):
     def __init__(self, opt):
         super(WDiscriminator, self).__init__()
+        self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         num_layer_in_body = opt.num_layer if opt.curr_scale >= opt.num_scales - 1 else opt.num_layer-2
-        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu)
         self.body = nn.Sequential()
         for i in range(num_layer_in_body):
-            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, padd=1, stride=1, norm_type=opt.norm_type)
+            block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu)
             self.body.add_module('block%d'%(i+1),block)
-        self.tail = nn.Sequential(nn.Conv2d(opt.base_channels,1,kernel_size=opt.ker_size,stride=1,padding=1),
-                                  nn.BatchNorm2d(1), #todo: I added, see what is happening
+        self.tail = nn.Sequential(ConvBlock(opt.base_channels, 1, opt.ker_size, self.images_per_gpu),
                                   nn.LeakyReLU(0.2))
 
     def forward(self, x):
