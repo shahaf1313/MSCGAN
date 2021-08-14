@@ -80,10 +80,10 @@ def train(opt):
             #     semseg_cs = convert_model(nn.DataParallel(semseg_cs)).to(opt.device)
 
             # todo: for now, decided to use GroupNorm instead of BN, so not using sync BN!
-            Dst_curr, Gst_curr = nn.DataParallel(Dst_curr, device_ids=opt.gpus), nn.DataParallel(Gst_curr, device_ids=opt.gpus)
-            Dts_curr, Gts_curr = nn.DataParallel(Dts_curr, device_ids=opt.gpus), nn.DataParallel(Gts_curr, device_ids=opt.gpus)
+            Dst_curr, Gst_curr = nn.DataParallel(Dst_curr), nn.DataParallel(Gst_curr)
+            Dts_curr, Gts_curr = nn.DataParallel(Dts_curr), nn.DataParallel(Gts_curr)
             if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
-                semseg_cs = nn.DataParallel(semseg_cs, device_ids=opt.gpus)
+                semseg_cs = nn.DataParallel(semseg_cs)
 
         print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
         if opt.last_scale:  # Last scale, print semseg network:
