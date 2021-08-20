@@ -197,7 +197,6 @@ class LocalNet(nn.Module):
         self.lrelu = nn.LeakyReLU()
         self.refpad = nn.ReflectionPad2d(1)
 
-
 # Generators:
 class ConvGenerator(nn.Module):
     def __init__(self, opt):
