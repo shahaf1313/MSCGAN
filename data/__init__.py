@@ -7,7 +7,7 @@ from data.synthia_dataset import SYNDataSet
 from data.im2im_dataset import Im2imDataset
 
 
-def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label_pyramid=False):
+def CreateSrcDataLoader(opt, Gs, set='train', get_image_label=False, get_image_label_pyramid=False):
     if opt.source == 'gta5':
         source_dataset = GTA5DataSet(opt.src_data_dir,
                                      opt.src_data_list,
@@ -15,6 +15,7 @@ def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label
                                      opt.num_scales,
                                      opt.curr_scale,
                                      set,
+                                     Gs,
                                      get_image_label=get_image_label,
                                      get_image_label_pyramid=get_image_label_pyramid)
     # elif args.source == 'synthia':
@@ -31,15 +32,16 @@ def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label
     return source_dataloader
 
 
-def CreateTrgDataLoader(opt, set='train', get_image_label=False, get_scales_pyramid=False):
+def CreateTrgDataLoader(opt, Gs, set='train', get_image_label=False, generate_prev_image=False):
     target_dataset = cityscapesDataSet(opt.trg_data_dir,
                                        opt.trg_data_list,
                                        opt.scale_factor,
                                        opt.num_scales,
                                        opt.curr_scale,
                                        set,
+                                       Gs,
                                        get_image_label=get_image_label,
-                                       get_scales_pyramid=get_scales_pyramid)
+                                       generate_prev_image=generate_prev_image)
 
     if set == 'train':
         target_dataloader = data.DataLoader(target_dataset,
@@ -95,3 +97,16 @@ def CreateIm2ImDataLoader(opt, set='train'):
 
 
     return domain_a_dataloader, domain_b_dataloader
+
+
+
+def create_scale_dataloader(opt, Gst, Gts):
+    opt.batch_size = opt.batch_size_list[opt.curr_scale]
+    source_loader, target_loader = CreateSrcDataLoader(opt, Gst, get_image_label=True), CreateTrgDataLoader(opt, Gts, generate_prev_image=True)
+    opt.epoch_size = np.maximum(len(source_loader.dataset), len(target_loader.dataset))
+    source_loader.dataset.SetEpochSize(opt.epoch_size)
+    target_loader.dataset.SetEpochSize(opt.epoch_size)
+    opt.source_loaders.append(source_loader)
+    opt.target_loaders.append(target_loader)
+    # if opt.last_scale:
+    opt.target_validation_loader = CreateTrgDataLoader(opt, None, set='val', get_image_label=True, generate_prev_image=False)

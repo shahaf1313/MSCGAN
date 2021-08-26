@@ -6,8 +6,9 @@ import os.path as osp
 from torch.utils import data
 from torchvision import transforms
 
+
 class domainAdaptationDataSet(data.Dataset):
-    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False):
+    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, pyramid_generators, device='cuda', get_image_label=False):
         self.root = root
         if images_list_path != None:
             self.images_list_file = osp.join(images_list_path, '%s.txt' % set)
@@ -16,10 +17,12 @@ class domainAdaptationDataSet(data.Dataset):
         self.num_scales = num_scales
         self. curr_scale = curr_scale
         self.set = set
+        self.device = device
         self.trans = transforms.ToTensor()
         self.crop_size = IMG_CROP_SIZE_SEMSEG
         self.ignore_label = IGNORE_LABEL
         self.get_image_label = get_image_label
+        self.Gs = [net.to('cpu') for net in pyramid_generators] if pyramid_generators!=None else None
         self.id_to_trainid = {7: 0, 8: 1, 11: 2, 12: 3, 13: 4, 17: 5,
                               19: 6, 20: 7, 21: 8, 22: 9, 23: 10, 24: 11, 25: 12,
                               26: 13, 27: 14, 28: 15, 31: 16, 32: 17, 33: 18}

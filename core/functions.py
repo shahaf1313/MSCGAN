@@ -8,11 +8,9 @@ from PIL import Image
 import os
 from core.constants import palette, NUM_CLASSES, IGNORE_LABEL
 
-
 def denorm(x):
     out = (x + 1) / 2
     return out.clamp(0, 1)
-
 
 def norm(x):
     out = (x - 0.5) * 2
@@ -60,6 +58,25 @@ def calc_gradient_penalty(netD, real_data, fake_data, LAMBDA, device):
     gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * LAMBDA
     return gradient_penalty
 
+def concat_pyramid(Gs, sources, scale_factor):
+    if len(Gs) == 0:
+        return torch.zeros_like(sources[0])
+    with torch.no_grad():
+        G_z = sources[0]
+        # labels = [None] * len(sources) if labels == None else labels
+        for G, source_curr, source_next in zip(Gs, sources, sources[1:]):
+            G_z = G_z[:, :, 0:source_curr.shape[2], 0:source_curr.shape[3]]
+            G_z = G(source_curr, G_z.detach())
+            # G_z = imresize(G_z, 1 / opt.scale_factor, opt)
+            G_z = imresize_torch(G_z, 1 / scale_factor, mode='bicubic')
+            G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
+    return G_z.detach()
+
+def generate_image(netG, curr_images, Gs, scales, cond_image, opt):
+    with torch.no_grad():
+        prevs = concat_pyramid(Gs, scales, opt.scale_factor)
+    fake_images = netG(curr_images, prevs, cond_image)
+    return fake_images
 
 def np2torch(x, opt):
     if opt.nc_im == 3:
@@ -167,7 +184,7 @@ def GeneratePyramid(image, num_scales, curr_scale, scale_factor, crop_size, is_l
             curr_size = (np.ceil(scale * np.array(crop_size))).astype(np.int)
             curr_scale_image = image.resize(curr_size, Image.BICUBIC if not is_label else Image.NEAREST)
             curr_scale_image = RGBImageToNumpy(curr_scale_image) if not is_label else ImageToNumpy(curr_scale_image)
-            scales_pyramid.append(curr_scale_image)
+            scales_pyramid.append(torch.tensor(curr_scale_image))
     elif isinstance(image, torch.Tensor):
         for i in range(0, curr_scale + 1, 1):
             if is_label:

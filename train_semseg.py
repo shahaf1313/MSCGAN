@@ -25,7 +25,7 @@ def main():
 
     source_train_loader = CreateSrcDataLoader(opt, 'train', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
-    target_val_loader = CreateTrgDataLoader(opt, 'val', get_scales_pyramid=True)
+    target_val_loader = CreateTrgDataLoader(opt, 'val', generate_prev_image=True)
 
     semseg_net, semseg_optimizer = CreateSemsegModel(opt)
     # semseg_scheduler = torch.optim.lr_scheduler.MultiStepLR(semseg_optimizer, milestones=np.arange(0, opt.num_epochs, 10), gamma=0.9)

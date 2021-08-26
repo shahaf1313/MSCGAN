@@ -31,7 +31,7 @@ def main():
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
-    target_val_loader = CreateTrgDataLoader(opt, 'val', get_image_label=True, get_scales_pyramid=True)
+    target_val_loader = CreateTrgDataLoader(opt, 'val', get_image_label=True, generate_prev_image=True)
 
     #Semseg To Cityscapes dataset:
     feature_extractor_cs, classifier_cs, optimizer_fea_cs, optimizer_cls_cs = CreateSemsegPyramidModel(opt, 'CS')
