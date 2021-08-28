@@ -66,7 +66,12 @@ def get_arguments():
     parser.add_argument('--lambda_grad', type=float, help='gradient penelty weight', default=0.1)
     parser.add_argument('--lambda_adversarial', type=float, help='adversarial loss weight', default=1)
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
-    parser.add_argument('--lambda_vgg', type=float, help='VGG perceptual loss weight', default=1)
+    parser.add_argument('--lambda_style', type=float, help='Style loss weight', default=1)
+    parser.add_argument('--content_layers', type=int, nargs='+', help='Layer indices to extract content features', default=[15])
+    parser.add_argument('--style_layers', type=int, nargs='+', help='Layer indices to extract style features', default=[3, 8, 15, 22])
+    parser.add_argument('--content_weight', type=float, help='Content loss weight', default=1.0)
+    parser.add_argument('--style_weight', type=float, help='style loss weight', default=30.0)
+    parser.add_argument('--tv_weight', type=float, help='tv loss weight', default=1.0)
 
     # Semseg network parameters:
     parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLab and VGG")
