@@ -255,7 +255,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                         cyc_losses, cyc_images = cycle_consistency_loss(source_scales, netGst, Gst,
                                                                         target_scales, netGts, Gts, opt,
                                                                         source_segmap, semseg_cs)
-                        for k,v in generator_losses.items():
+                        for k,v in cyc_losses.items():
                             opt.tb.add_scalar('Scale%d/Cyclic/%s' % (opt.curr_scale,k), v, int(generator_steps / opt.cyclic_loss_calc_rate))
 
 
