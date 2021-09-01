@@ -25,12 +25,7 @@ def train(opt):
     opt.best_miou = BEST_MIOU
     semseg_cs = None
     if opt.continue_train_from_path != '':
-        Gst, Gts, Dst, Dts = load_trained_networks(opt)
-        # for gst, gts, dst, dts in zip(Gst, Gts, Dst, Dts):
-        #     dst.use_extended_generator = False
-        #     dts.use_extended_generator = False
-        #     gst.use_extended_generator = False
-        #     gts.use_extended_generator = False
+        Gst, Gts, Dst, Dts, semseg_cs = load_trained_networks(opt)
         # todo: add loading semseg network
         assert len(Gst) == len(Gts) == len(Dst) == len(Dts)
         scale_num = len(Gst) - 1 if opt.resume_to_epoch > 0 else len(Gst)
@@ -67,10 +62,11 @@ def train(opt):
         else:
             Dst_curr, Gst_curr = init_models(opt)
             Dts_curr, Gts_curr = init_models(opt)
-            if opt.last_scale:  # Last scale, add semseg network:
-                semseg_cs, _ = CreateSemsegModel(opt)
-            else:
-                semseg_cs = None
+
+        if opt.last_scale and semseg_cs==None:  # Last scale, add semseg network:
+            semseg_cs, _ = CreateSemsegModel(opt)
+        else:
+            semseg_cs = None
 
         if len(opt.gpus) > 1:
             # todo: This code section initializes a SyncBN model. It utilizes more memory but gives better results:
@@ -148,7 +144,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     while keep_training:
         print('scale %d: starting epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.epochs_per_scale))
         opt.warmup = epoch_num <= opt.warmup_epochs
-        opt.vgg_warmup = epoch_num <= opt.warmup_epochs if not opt.last_scale else epoch_num <= opt.warmup_epochs//2
+        # opt.vgg_warmup = epoch_num <= opt.warmup_epochs if not opt.last_scale else epoch_num <= opt.warmup_epochs//2
 
         if opt.last_scale and opt.warmup:
             print('scale %d: warmup epoch [%d/%d]' % (opt.curr_scale, epoch_num, opt.warmup_epochs))
@@ -178,7 +174,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
             # Resize scale and label tensors if needed:
             if opt.use_half_image_size:
-                source_label = (nn.functional.interpolate(source_label.unsqueeze(1), scale_factor=[0.5, 0.5], mode='nearest')).squeeze()
+                source_label = (nn.functional.interpolate(source_label.unsqueeze(1), scale_factor=[0.5, 0.5], mode='nearest')).squeeze(1)
                 for i in range(len(source_scales)):
                     source_scales[i] = torch.clamp(nn.functional.interpolate(source_scales[i], scale_factor=[0.5, 0.5], mode='bicubic'), -1, 1)
                     target_scales[i] = torch.clamp(nn.functional.interpolate(target_scales[i], scale_factor=[0.5, 0.5], mode='bicubic'), -1, 1)
@@ -550,7 +546,11 @@ def load_trained_networks(opt):
         m2.eval().to(opt.device)
         m3.eval().to(opt.device)
         m4.eval().to(opt.device)
-    return Gst, Gts, Dst, Dts
+    if os.path.isfile(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth')):
+        semseg_cs = torch.load(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth'))
+    else:
+        semseg_cs = None
+    return Gst, Gts, Dst, Dts, semseg_cs
 
 
 def norm_image(im, norm_type='tanh_norm'):
