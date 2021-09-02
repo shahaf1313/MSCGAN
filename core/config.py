@@ -51,7 +51,7 @@ def get_arguments():
     parser.add_argument('--max_size', type=int, help='image maximal size at the largest scale', default=None)
     parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=None)
     parser.add_argument('--groups_num', type=int, help='number of groups in Group Norm', default=None)
-
+    parser.add_argument('--base_channels', type=int, help='number of channels in the generator and discriminator.', default=32)
 
     # optimization hyper parameters:
     parser.add_argument('--epochs_per_scale', type=int, default=12, help='number of epochs to train per scale')

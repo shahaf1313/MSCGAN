@@ -44,7 +44,7 @@ def train(opt):
         opt.curr_scale = scale_num
         opt.last_scale = opt.curr_scale == opt.num_scales
         # opt.base_channels = np.minimum(MAX_CHANNELS_PER_LAYER, int(opt.nfc * np.power(2, (np.floor((opt.curr_scale + 1) / 2)))))
-        opt.base_channels = int(np.minimum(opt.nfc*16*(opt.curr_scale+1),32))
+        # opt.base_channels = int(np.minimum(opt.nfc*16*(opt.curr_scale+1),32))
         opt.outf = '%s/%d' % (opt.out_, scale_num)
         try:
             os.makedirs(opt.outf)
