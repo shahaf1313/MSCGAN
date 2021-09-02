@@ -100,6 +100,7 @@ def get_arguments():
     parser.add_argument('--debug_stop_epoch', type=int, default=0, help='Epoch number to finish training current scale in debug mode.')
     parser.add_argument("--checkpoints_dir", type=str, required=False, default='./TrainedModels', help="Where to save snapshots of the model.")
     parser.add_argument("--print_rate", type=int, required=False, default=100, help="Print progress to screen every x iterations")
+    parser.add_argument("--save_checkpoint_rate", type=int, required=False, default=1000, help="Saves progress to checkpoint files every x iterations")
     parser.add_argument("--pics_per_epoch", type=int, required=False, default=10, help="Defines the number of pictures to save each epoch.")
 
     return parser

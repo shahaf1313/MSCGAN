@@ -65,8 +65,6 @@ def train(opt):
 
         if opt.last_scale and semseg_cs==None:  # Last scale, add semseg network:
             semseg_cs, _ = CreateSemsegModel(opt)
-        else:
-            semseg_cs = None
 
         if len(opt.gpus) > 1:
             # todo: This code section initializes a SyncBN model. It utilizes more memory but gives better results:
@@ -131,14 +129,15 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     opt.style_transfer_loss = StyleTransferLoss(opt)
     total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size)
     start = time.time()
+    epoch_num = epoch_num_to_resume if resume else 1
+    steps = (epoch_num_to_resume - 1) * int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size) if resume else 0
     discriminator_steps = 0
     generator_steps = 0
-    semseg_steps = 0
-    epoch_num = epoch_num_to_resume if resume else 1
-    steps = (epoch_num_to_resume - 1) * int(opt.epoch_size * np.maximum(opt.Dsteps, opt.Gsteps) / batch_size) if resume and not opt.debug_run else 0
-    checkpoint_int = 1
-    print_int = 0 if not resume else int(steps / opt.print_rate)
-    save_pics_int = 0
+    semseg_steps    = 0
+    checkpoint_int  = 1 if not resume else int(steps / opt.save_checkpoint_rate) + 1
+    print_int       = 0 if not resume else int(steps / opt.print_rate)
+    save_pics_int   = 0 if not resume else int(steps / opt.save_pics_rate)
+    opt.debug_init_steps = 0 if not resume else steps
     keep_training = True
 
     while keep_training:
@@ -154,7 +153,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             if steps > total_steps_per_scale:
                 keep_training = False
                 break
-            if opt.debug_run and steps > epoch_num * opt.debug_stop_iteration:
+            if opt.debug_run and steps > opt.debug_init_steps + (epoch_num-resume*(epoch_num_to_resume-1)) * opt.debug_stop_iteration:
                 if opt.debug_stop_epoch <= epoch_num:
                     keep_training = False
                 break
@@ -329,13 +328,13 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                 save_pics_int += 1
 
-            # Save network checkpoint every 1k steps:
-            if steps > checkpoint_int * 1000:
+            # Save network checkpoint every opt.save_checkpoint_rate steps:
+            if steps > checkpoint_int * opt.save_checkpoint_rate:
                 print('scale %d: saving networks after %d steps...' % (opt.curr_scale, steps))
                 save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
                 checkpoint_int += 1
 
-            steps = np.minimum(generator_steps, discriminator_steps)
+            steps += np.minimum(opt.Gsteps, opt.Dsteps)
 
         ############################
         # (5) Validate performance after each epoch if we are at the last scale:
