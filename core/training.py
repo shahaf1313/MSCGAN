@@ -581,6 +581,10 @@ def calculte_validation_accuracy(semseg_net, target_val_loader, epoch_num, opt):
         running_metrics_val = runningScore(NUM_CLASSES)
         cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
         for val_batch_num, (target_images, target_labels) in enumerate(target_val_loader):
+            if opt.use_half_image_size:
+                target_labels = (nn.functional.interpolate(target_labels.unsqueeze(1), scale_factor=[0.5, 0.5], mode='nearest')).squeeze(1)
+                target_images = torch.clamp(nn.functional.interpolate(target_images, scale_factor=[0.5, 0.5], mode='bicubic'), -1, 1)
+
             if opt.debug_run and val_batch_num > opt.debug_stop_iteration:
                 break
             target_images = target_images.to(opt.device)
