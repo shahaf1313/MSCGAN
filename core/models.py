@@ -21,20 +21,18 @@ class ConvBlock(nn.Sequential):
         self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride, padding=padd))
 
 class ConvBlockSpade(nn.Module):
-    def __init__(self, in_channel, out_channel, ker_size, im_per_gpu, groups_num, padd=1, stride=1):
+    def __init__(self, in_channel, out_channel, ker_size, im_per_gpu, groups_num, norm_channels=NUM_CLASSES+1, padd=1, stride=1): #+1 for don't care label
         super(ConvBlockSpade, self).__init__()
         # Normalization:
         if im_per_gpu >= 16:
             self.norm = nn.BatchNorm2d(in_channel)
-            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=True, label_nc=NUM_CLASSES+1) #+1 for don't care label
+            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=True, label_nc=norm_channels)
         elif im_per_gpu < 16 and in_channel % groups_num == 0:
             self.norm = nn.GroupNorm(num_groups=groups_num, num_channels=in_channel, affine=True)
-            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=NUM_CLASSES+1) #+1 for don't care label
+            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=norm_channels)
         else: #don't normalize only in the head module, where you have only 3 channels..
             self.norm  = None
             self.spade = None
-        # todo: delete after training @ Yann finishes:
-        self.bn = self.norm
         # Activation:
         self.actvn = nn.LeakyReLU(0.2)
         # Convolution:
@@ -230,13 +228,14 @@ class LabelConditionedGenerator(nn.Module):
         self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         self.is_initial_scale = opt.curr_scale == 0
         self.use_extended_generator = opt.curr_scale >= opt.num_scales - 1
-        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
-        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
-        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
-        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
-        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
-        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
-        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.norm_channels = opt.curr_norm_channels if opt.use_perceptual_norm else NUM_CLASSES+1
+        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
+        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
+        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
+        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
+        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
+        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
+        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
         self.tail_actvn = nn.Tanh()
     def forward(self, curr_scale, prev_scale, seg_map=None):
         if self.is_initial_scale:
