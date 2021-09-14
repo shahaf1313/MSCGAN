@@ -119,8 +119,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     if opt.last_scale:
         optimizerSemseg = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
                                     weight_decay=opt.weight_decay)
-        optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
-                                       momentum=opt.momentum, weight_decay=opt.weight_decay)
+        # optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
+        #                                momentum=opt.momentum, weight_decay=opt.weight_decay)
     else:
         optimizerSemseg = None
 
@@ -225,8 +225,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 # train generator networks between domains (S->T, T->S)
                 optimizerGst.zero_grad()
                 optimizerGts.zero_grad()
-                if opt.last_scale and not opt.warmup:
-                    optimizerSemsegGen.zero_grad()
+                # if opt.last_scale and not opt.warmup:
+                #     optimizerSemsegGen.zero_grad()
 
                 # S -> T:
                 generator_losses = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt,
@@ -256,8 +256,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                 optimizerGst.step()
                 optimizerGts.step()
-                if opt.last_scale and not opt.warmup:
-                    optimizerSemsegGen.step()
+                # if opt.last_scale and not opt.warmup:
+                #     optimizerSemsegGen.step()
 
                 generator_steps += 1
 
