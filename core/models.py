@@ -21,15 +21,23 @@ class ConvBlock(nn.Sequential):
         self.add_module('conv',nn.Conv2d(in_channel ,out_channel,kernel_size=ker_size,stride=stride, padding=padd))
 
 class ConvBlockSpade(nn.Module):
-    def __init__(self, in_channel, out_channel, ker_size, im_per_gpu, groups_num, norm_channels=NUM_CLASSES+1, padd=1, stride=1): #+1 for don't care label
+    index_dict = { 0 : {'hw_coeff' : 1, 'percep_nc' : 64},
+                   1 : {'hw_coeff' : 0.5**2, 'percep_nc' : 128},
+                   2 : {'hw_coeff' : 0.5**4, 'percep_nc' : 256},
+                   3 : {'hw_coeff' : 0.5**6, 'percep_nc' : 512}}
+    def __init__(self, in_channel, out_channel, ker_size, im_per_gpu, groups_num, vgg_index, curr_scale_size, padd=1, stride=1): #+1 for don't care label
         super(ConvBlockSpade, self).__init__()
         # Normalization:
+        hw = int(ConvBlockSpade.index_dict[vgg_index]['hw_coeff']*curr_scale_size)
+        precp_nc = ConvBlockSpade.index_dict[vgg_index]['percep_nc']
         if im_per_gpu >= 16:
             self.norm = nn.BatchNorm2d(in_channel)
-            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=True, label_nc=norm_channels)
+            # self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=True, label_nc=norm_channels)
+            self.spade = PerceptualCondition(norm_nc=in_channel, groups_num=groups_num, use_bn=True, hw=hw, precp_nc=precp_nc)
         elif im_per_gpu < 16 and in_channel % groups_num == 0:
             self.norm = nn.GroupNorm(num_groups=groups_num, num_channels=in_channel, affine=True)
-            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=norm_channels)
+            # self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=norm_channels)
+            self.spade = PerceptualCondition(norm_nc=in_channel, groups_num=groups_num, use_bn=True, hw=hw, precp_nc=precp_nc)
         else: #don't normalize only in the head module, where you have only 3 channels..
             self.norm  = None
             self.spade = None
@@ -95,6 +103,37 @@ class SPADE(nn.Module):
         actv = self.mlp_shared(segmap)
         gamma = self.mlp_gamma(actv)
         beta = self.mlp_beta(actv)
+
+        # apply scale and bias
+        out = normalized * (1 + gamma) + beta
+        # out = x * (1 + gamma) + beta
+
+        return out
+
+
+class PerceptualCondition(nn.Module):
+    def __init__(self, norm_nc, groups_num, use_bn, hw, precp_nc):
+        super().__init__()
+        if use_bn:
+            self.param_free_norm = nn.BatchNorm2d(norm_nc, affine=False)
+        else:
+            self.param_free_norm = nn.GroupNorm(num_groups=groups_num, num_channels=norm_nc, affine=False)
+
+        self.mlp_shared = nn.Sequential(
+            nn.Linear(hw, 1),
+            nn.ReLU()
+        )
+        self.mlp_gamma = nn.Linear(precp_nc, norm_nc)
+        self.mlp_beta = nn.Linear(precp_nc, norm_nc)
+    def forward(self, x, feat):
+
+        # Part 1. generate parameter-free normalized activations
+        normalized = self.param_free_norm(x)
+
+        # Part 2. produce scaling and bias conditioned on semantic map
+        actv  = self.mlp_shared(feat.view(feat.shape[0],feat.shape[1],-1)).squeeze(2)
+        gamma = self.mlp_gamma(actv).unsqueeze(2).unsqueeze(3)
+        beta  =  self.mlp_beta(actv).unsqueeze(2).unsqueeze(3)
 
         # apply scale and bias
         out = normalized * (1 + gamma) + beta
@@ -228,14 +267,14 @@ class LabelConditionedGenerator(nn.Module):
         self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         self.is_initial_scale = opt.curr_scale == 0
         self.use_extended_generator = opt.curr_scale >= opt.num_scales - 1
-        self.norm_channels = opt.curr_norm_channels if opt.use_perceptual_norm else NUM_CLASSES+1
-        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
-        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
-        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
-        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
-        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
-        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
-        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu, opt.groups_num, norm_channels=self.norm_channels)
+        curr_scale_size = 0.25**(opt.num_scales - opt.curr_scale)*H*W
+        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, opt.perceptual_norm_layer, curr_scale_size)
+        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, opt.perceptual_norm_layer, curr_scale_size)
+        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, opt.perceptual_norm_layer, curr_scale_size)
+        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, opt.perceptual_norm_layer, curr_scale_size)
+        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, opt.perceptual_norm_layer, curr_scale_size)
+        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num, opt.perceptual_norm_layer, curr_scale_size)
+        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu, opt.groups_num, opt.perceptual_norm_layer, curr_scale_size)
         self.tail_actvn = nn.Tanh()
     def forward(self, curr_scale, prev_scale, seg_map=None):
         if self.is_initial_scale:
