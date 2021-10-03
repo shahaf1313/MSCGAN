@@ -80,12 +80,10 @@ def get_arguments():
     parser.add_argument("--num_classes", type=int, required=False, default=19, help="Number of classes in the segmentation task. Default - 19")
     parser.add_argument("--ignore_threshold", type=float, required=False, default=0.5, help="Threshold probability to accept label conditioning of the semseg network.")
     parser.add_argument('--epochs_semseg', type=int, default=12, help='number of epochs to train semseg model')
-    parser.add_argument("--multiscale_model_path", type=str, default='', help="path to Generators from source to target domain and vice versa.")
-    parser.add_argument("--semseg_model_path", type=str, default='', help="path to folder that contains classifier and feature extractor weights.")
     parser.add_argument("--semseg_model_epoch_to_resume", type=int, default=-1, help='Epoch that checkpoint to semseg net saved from')
     parser.add_argument('--use_semseg_generation_training', default=False, action='store_true', help='Uses label generation training in the semseg network.')
     parser.add_argument('--use_distillation', default=False, action='store_true', help='Uses distillation with trusted labels.')
-    parser.add_argument('--load_only_gta_weights', default=False, action='store_true', help='Loads only source (GTA5) semeseg weigths.')
+    parser.add_argument('--load_pretrained_semseg_on_gta', default=False, action='store_true', help='Loads a DeepLabV2 net, pretrained on source (GTA5), with mIoU of 70%.')
     parser.add_argument('--lr_semseg', type=float, default=0.00025, help='learning rate, default=0.00025')
     parser.add_argument("--weight-decay", type=float, default=0.0005, help="Regularisation parameter for L2-loss.")
     parser.add_argument("--ita", type=float, default=2.0, help="ita for robust entropy")
@@ -124,6 +122,7 @@ class Logger(object):
         self.log.flush()
 
 def post_config(opt):
+        opt.pretrained_deeplabv2_on_gta_miou_70 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.7mIoU_on_GTA.pth'
         # init fixed parameters
         opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])
         opt.out_ = '%s/%s' % (opt.checkpoints_dir, opt.folder_string)

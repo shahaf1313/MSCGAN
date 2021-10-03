@@ -37,7 +37,7 @@ class ConvBlockSpade(nn.Module):
         elif im_per_gpu < 16 and in_channel % groups_num == 0:
             self.norm = nn.GroupNorm(num_groups=groups_num, num_channels=in_channel, affine=True)
             # self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=norm_channels)
-            self.spade = PerceptualCondition(norm_nc=in_channel, groups_num=groups_num, use_bn=True, hw=hw, precp_nc=precp_nc)
+            self.spade = PerceptualCondition(norm_nc=in_channel, groups_num=groups_num, use_bn=False, hw=hw, precp_nc=precp_nc)
         else: #don't normalize only in the head module, where you have only 3 channels..
             self.norm  = None
             self.spade = None

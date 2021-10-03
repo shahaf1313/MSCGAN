@@ -2,7 +2,6 @@ from semseg_models.deeplab import Deeplab
 from semseg_models.deeplabv2 import DeeplabV2
 from semseg_models.fcn8s import VGG16_FCN8s
 import torch.optim as optim
-import torch.nn as nn
 import os
 from core.constants import NUM_CLASSES
 from semseg_models.build import build_feature_extractor, build_classifier, ASPP_Classifier_V2
@@ -17,10 +16,13 @@ def CreateSemsegModel(args):
         optimizer.zero_grad()
 
     if args.model == 'DeepLabV2':
-        if args.images_per_gpu[args.curr_scale] > 16 or args.force_bn_in_deeplab:
+        if args.load_pretrained_semseg_on_gta:
+            model = torch.load(args.pretrained_deeplabv2_on_gta_miou_70)
+        elif args.images_per_gpu[args.curr_scale] > 16 or args.force_bn_in_deeplab:
             model = DeeplabV2(BatchNorm=True, num_classes=NUM_CLASSES)
         elif args.images_per_gpu[args.curr_scale] <= 16 or args.force_gn_in_deeplab:
             model = DeeplabV2(BatchNorm=False, num_classes=NUM_CLASSES)
+
         optimizer = optim.SGD(model.optim_parameters(args),
                               lr=args.lr_semseg, momentum=args.momentum, weight_decay=args.weight_decay)
         optimizer.zero_grad()
@@ -36,8 +38,8 @@ def CreateSemsegModel(args):
         lr=args.lr_semseg,
         betas=(0.9, 0.99))
         optimizer.zero_grad()
-    if args.semseg_model_path != '':
-        model=torch.load(args.pretrained_semseg_path)
+    # if args.semseg_model_path != '':
+    #     model=torch.load(args.pretrained_semseg_path)
     model.to(args.device)
     return model, optimizer
 
