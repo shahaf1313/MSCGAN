@@ -169,9 +169,9 @@ class Classifier_Module2(nn.Module):
 
 class ResNet101(nn.Module):
     def __init__(self, block, layers, num_classes, BatchNorm, bn_clr=False):
+        super(ResNet101, self).__init__()
         self.inplanes = 64
         self.bn_clr = bn_clr
-        super(ResNet101, self).__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         if BatchNorm:

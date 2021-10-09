@@ -64,6 +64,7 @@ def get_arguments():
     parser.add_argument('--lambda_grad', type=float, help='gradient penelty weight', default=0.1)
     parser.add_argument('--lambda_adversarial', type=float, help='adversarial loss weight', default=1)
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
+    parser.add_argument('--lambda_labels', type=float, help='label loss weight', default=1)
     parser.add_argument('--lambda_style', type=float, help='Style loss weight', default=1)
     parser.add_argument('--content_layers', type=int, nargs='+', help='Layer indices to extract content features', default=[15])
     parser.add_argument('--style_layers', type=int, nargs='+', help='Layer indices to extract style features', default=[3, 8, 15, 22])
@@ -79,7 +80,6 @@ def get_arguments():
     parser.add_argument("--multiscale_model_path", type=str, default='', help="path to Generators from source to target domain and vice versa.")
     parser.add_argument("--semseg_model_path", type=str, default='', help="path to folder that contains classifier and feature extractor weights.")
     parser.add_argument("--semseg_model_epoch_to_resume", type=int, default=-1, help='Epoch that checkpoint to semseg net saved from')
-    parser.add_argument('--use_semseg_generation_training', default=False, action='store_true', help='Uses label generation training in the semseg network.')
     parser.add_argument('--use_distillation', default=False, action='store_true', help='Uses distillation with trusted labels.')
     parser.add_argument('--load_only_gta_weights', default=False, action='store_true', help='Loads only source (GTA5) semeseg weigths.')
     parser.add_argument('--lr_semseg', type=float, default=0.00025, help='learning rate, default=0.00025')
@@ -121,6 +121,7 @@ class Logger(object):
 
 def post_config(opt):
         # init fixed parameters
+        opt.pretrained_deeplabv2_on_gta_miou_70 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.7mIoU_on_GTA.pth'
         opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])
         opt.out_ = '%s/%s' % (opt.checkpoints_dir, opt.folder_string)
 

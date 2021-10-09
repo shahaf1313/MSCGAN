@@ -190,7 +190,11 @@ def ImageToNumpy(im):
         im = np.transpose(im, (2, 0, 1))
     return im
 
-def encode_semseg_out(input, threshold):
+def encode_semseg_out(input):
+    max_classes = (input == input.max(dim=1, keepdim=True)[0]) * input
+    return max_classes
+
+def encode_semseg_out_with_ignore_label(input, threshold):
     softmax_input = nn.functional.softmax(input, dim=1)
     non_ignore_classes = (softmax_input == softmax_input.max(dim=1, keepdim=True)[0]) * input
     max_soft_values = softmax_input.max(dim=1)[0]
@@ -207,11 +211,17 @@ def strongly_trusted_labels(input, threshold, ignore_label=IGNORE_LABEL):
     strong_labels[softmax_max_values == 0.] = ignore_label
     return strong_labels
 
-def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
+def one_hot_encoder_ignore_class(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
     z = input.clone()
     z[z==ignore_label] = num_classes
     output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
     return output
+
+def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
+    z = input.clone()
+    z[input == ignore_label] = num_classes
+    output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
+    return output[:,:num_classes,:,:]
 
 class runningScore(object):
     def __init__(self, n_classes):
