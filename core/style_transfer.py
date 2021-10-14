@@ -27,13 +27,14 @@ class StyleTransferLoss(nn.Module):
         self.style_weight = opt.style_weight
         self.tv_weight = opt.tv_weight
 
-    def forward(self, fake_image, fake_content_features, fake_style_features, source_content_features, target_style_features):
-        content_loss = self.calc_content_loss(fake_content_features, source_content_features)
+    def forward(self, fake_image, fake_style_features, target_style_features):
+        # content_loss = self.calc_content_loss(fake_content_features, source_content_features)
         style_loss = self.calc_gram_loss(fake_style_features, target_style_features)
         tv_loss = calc_tv_loss(fake_image)
-        total_style_loss = content_loss * self.content_weight + style_loss * self.style_weight + tv_loss * self.tv_weight
-        style_losses = {'ContentLoss': content_loss.item(),
-                        'StyleLoss': style_loss.item(),
+        # total_style_loss = content_loss * self.content_weight + style_loss * self.style_weight + tv_loss * self.tv_weight
+        total_style_loss = style_loss * self.style_weight + tv_loss * self.tv_weight
+        style_losses = {'StyleLoss': style_loss.item(),
+                        #'ContentLoss': content_loss.item(),
                         'TVLoss': tv_loss.item(),
                         'TotalStyleLoss': total_style_loss.item()}
         return total_style_loss, style_losses

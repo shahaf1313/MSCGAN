@@ -93,8 +93,8 @@ def read_image2np(opt):
     return x
 
 
-def save_networks(path, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs=None):
-    if not opt.debug_run:
+def save_networks(path, netDst, netGst, netGts, Gst, Gts, Dst, opt, semseg_cs=None):
+    # if not opt.debug_run:
         try:
             os.makedirs(path)
         except OSError:
@@ -102,14 +102,12 @@ def save_networks(path, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt,
         if len(opt.gpus) > 1:
             torch.save(Dst + [netDst.module], '%s/Dst.pth' % (path))
             torch.save(Gst + [netGst.module], '%s/Gst.pth' % (path))
-            torch.save(Dts + [netDts.module], '%s/Dts.pth' % (path))
             torch.save(Gts + [netGts.module], '%s/Gts.pth' % (path))
             if semseg_cs != None:
                 torch.save(semseg_cs.module, '%s/semseg_cs.pth' % (path))
         else:
             torch.save(Dst + [netDst], '%s/Dst.pth' % (path))
             torch.save(Gst + [netGst], '%s/Gst.pth' % (path))
-            torch.save(Dts + [netDts], '%s/Dts.pth' % (path))
             torch.save(Gts + [netGts], '%s/Gts.pth' % (path))
             if semseg_cs != None:
                 torch.save(semseg_cs, '%s/semseg_cs.pth' % (path))
@@ -220,6 +218,7 @@ def one_hot_encoder_ignore_class(input, num_classes=NUM_CLASSES, ignore_label=IG
 def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
     z = input.clone()
     z[input == ignore_label] = num_classes
+    z = z.squeeze(1)
     output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
     return output[:,:num_classes,:,:]
 

@@ -200,13 +200,13 @@ class ConvGenerator(nn.Module):
         self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         self.is_initial_scale = opt.curr_scale == 0
         alpha = 1 if self.is_initial_scale else 0
-        self.head = ConvBlock((2-alpha)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.head = ConvBlock((2-alpha)*opt.nc_im_in, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.body = nn.Sequential()
         for i in range(opt.num_layer-2):
             block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
             self.body.add_module('block%d'%(i+1),block)
         self.tail = nn.Sequential(
-            ConvBlock(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu, opt.groups_num),
+            ConvBlock(opt.base_channels, opt.nc_im_out, opt.ker_size, self.images_per_gpu, opt.groups_num),
             nn.Tanh()
         )
     def forward(self, curr_scale, prev_scale, label=None):
@@ -225,13 +225,13 @@ class LabelConditionedGenerator(nn.Module):
         self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         self.is_initial_scale = opt.curr_scale == 0
         self.use_extended_generator = opt.curr_scale >= opt.num_scales - 1
-        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.head =     ConvBlockSpade((2-self.is_initial_scale)*opt.nc_im_in, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
-        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.tail =     ConvBlockSpade(opt.base_channels, opt.nc_im_out, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.tail_actvn = nn.Tanh()
     def forward(self, curr_scale, prev_scale, seg_map=None):
         if self.is_initial_scale:
@@ -425,58 +425,86 @@ class UNetGeneratorTwoLayers(nn.Module):
         return out
 
 class FCCGenerator(nn.Module):
-    def __init__(self, opt):
+    def __init__(self, opt, use_spade):
         super(FCCGenerator, self).__init__()
         self.is_initial_scale = opt.curr_scale == 0
         self.embedding_features_size = [8, 16]
         self.embedding_channels_size = 64
+        self.norm_linear = nn.BatchNorm1d
         self.embedding_size = self.embedding_features_size[0] * self.embedding_features_size[1] * self.embedding_channels_size
         self.scale_size = [int(opt.scale_factor**(opt.num_scales-opt.curr_scale) * H),
                            int(opt.scale_factor**(opt.num_scales-opt.curr_scale) * W)]
         assert H == W/2
         self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
 
-        # Down Conv:
-        self.conv_1_down = ConvBlockSpade(opt.nc_im,
-                                     self.embedding_channels_size//4,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+        if use_spade:
+            # Down Conv:
+            self.conv_1_down = ConvBlockSpade(opt.nc_im_in,
+                                         self.embedding_channels_size//4,
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//4,
-                                     self.embedding_channels_size//2,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//4,
+                                         self.embedding_channels_size//2,
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.conv_3_down = ConvBlockSpade(self.embedding_channels_size//2,
-                                     self.embedding_channels_size,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            self.conv_3_down = ConvBlockSpade(self.embedding_channels_size//2,
+                                         self.embedding_channels_size,
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        # Up Conv:
-        self.conv_1_up = ConvBlockSpade(self.embedding_channels_size,
-                                          self.embedding_channels_size//2,
-                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            # Up Conv:
+            self.conv_1_up = ConvBlockSpade(self.embedding_channels_size,
+                                              self.embedding_channels_size//2,
+                                              opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.conv_2_up = ConvBlockSpade(self.embedding_channels_size//2,
-                                          self.embedding_channels_size//4,
-                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            self.conv_2_up = ConvBlockSpade(self.embedding_channels_size//2,
+                                              self.embedding_channels_size//4,
+                                              opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.conv_3_up = ConvBlockSpade(self.embedding_channels_size//4,
-                                          opt.nc_im,
-                                          opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            self.conv_3_up = ConvBlockSpade(self.embedding_channels_size//4,
+                                              opt.nc_im_out,
+                                              opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+        else:
+            # Down Conv:
+            self.conv_1_down = ConvBlock(opt.nc_im_in,
+                                         self.embedding_channels_size//4,
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+
+            self.conv_2_down = ConvBlock(self.embedding_channels_size//4,
+                                         self.embedding_channels_size//2,
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+
+            self.conv_3_down = ConvBlock(self.embedding_channels_size//2,
+                                         self.embedding_channels_size,
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+
+            # Up Conv:
+            self.conv_1_up = ConvBlock(self.embedding_channels_size,
+                                       self.embedding_channels_size//2,
+                                       opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+
+            self.conv_2_up = ConvBlock(self.embedding_channels_size//2,
+                                       self.embedding_channels_size//4,
+                                       opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+
+            self.conv_3_up = ConvBlock(self.embedding_channels_size//4,
+                                       opt.nc_im_out,
+                                       opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
         # Down FC:
-        self.fc_1_down = nn.Sequential(nn.BatchNorm1d(self.embedding_size),
+        self.fc_1_down = nn.Sequential(nn.BatchNorm1d(self.embedding_size) if opt.images_per_gpu[opt.curr_scale] > 16 else nn.GroupNorm(opt.groups_num, self.embedding_size),
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size, self.embedding_size//2**4, bias=True))
 
-        self.fc_2_down = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**4),
+        self.fc_2_down = nn.Sequential(nn.BatchNorm1d(self.embedding_size) if opt.images_per_gpu[opt.curr_scale] > 16 else nn.GroupNorm(opt.groups_num, self.embedding_size//2**4),
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size//2**4, self.embedding_size//2**8, bias=True))
 
         # Up FC:
-        self.fc_1_up = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**8),
+        self.fc_1_up = nn.Sequential(nn.BatchNorm1d(self.embedding_size) if opt.images_per_gpu[opt.curr_scale] > 16 else nn.GroupNorm(opt.groups_num, self.embedding_size//2**8),
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size//2**8, self.embedding_size//2**4, bias=True))
 
-        self.fc_2_up = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**4),
+        self.fc_2_up = nn.Sequential(nn.BatchNorm1d(self.embedding_size) if opt.images_per_gpu[opt.curr_scale] > 16 else nn.GroupNorm(opt.groups_num, self.embedding_size//2**4),
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size//2**4, self.embedding_size, bias=True))
 
@@ -505,7 +533,6 @@ class FCCGenerator(nn.Module):
         x = self.conv_3_up(x)
         x = self.final_actvn(x)
         return x
-
 
 # Discriminators:
 class WDiscriminator(nn.Module):
@@ -575,7 +602,7 @@ class WDiscriminatorDownscale(nn.Module):
         return  x2
 
 class FCCDiscriminator(nn.Module):
-    def __init__(self, opt):
+    def __init__(self, opt, use_sapde):
         super(FCCDiscriminator, self).__init__()
         self.embedding_features_size = [8, 16]
         self.embedding_channels_size = 64
@@ -584,36 +611,48 @@ class FCCDiscriminator(nn.Module):
                            opt.scale_factor**(opt.num_scales-opt.curr_scale) * W]
         assert H == W/2
         self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
+        if use_sapde:
+            self.conv_1_down = ConvBlockSpade(opt.nc_im_in,
+                                              self.embedding_channels_size//4,
+                                              opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.conv_1 = ConvBlockSpade(opt.nc_im,
-                                     self.embedding_channels_size//4,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//4,
+                                              self.embedding_channels_size//2,
+                                              opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.conv_2 = ConvBlockSpade(self.embedding_channels_size//4,
-                                     self.embedding_channels_size//2,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//2,
+                                              self.embedding_channels_size,
+                                              opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+        else:
+            self.conv_1_down = ConvBlock(opt.nc_im_in,
+                                          self.embedding_channels_size//4,
+                                          opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.conv_3 = ConvBlockSpade(self.embedding_channels_size//2,
-                                     self.embedding_channels_size,
-                                     opt.ker_size, opt.padd_size, stride=1, norm_type=opt.norm_type)
+            self.conv_2_down = ConvBlock(self.embedding_channels_size//4,
+                                          self.embedding_channels_size//2,
+                                          opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-        self.fc_1 = nn.Sequential(nn.BatchNorm1d(self.embedding_size),
+            self.conv_3_down = ConvBlock(self.embedding_channels_size//2,
+                                          self.embedding_channels_size,
+                                          opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+
+        self.fc_1 = nn.Sequential(nn.BatchNorm1d(self.embedding_size) if opt.images_per_gpu[opt.curr_scale] > 16 else nn.GroupNorm(opt.groups_num, self.embedding_size),
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size, self.embedding_size//2**4, bias=True))
 
-        self.fc_2 = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**4),
+        self.fc_2 = nn.Sequential(nn.BatchNorm1d(self.embedding_size) if opt.images_per_gpu[opt.curr_scale] > 16 else nn.GroupNorm(opt.groups_num, self.embedding_size//2**4),
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size//2**4, self.embedding_size//2**8, bias=True))
 
-        self.fc_3 = nn.Sequential(nn.BatchNorm1d(self.embedding_size//2**8),
+        self.fc_3 = nn.Sequential(nn.BatchNorm1d(self.embedding_size) if opt.images_per_gpu[opt.curr_scale] > 16 else nn.GroupNorm(opt.groups_num, self.embedding_size//2**8),
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size//2**8, 1, bias=True))
 
     def forward(self, x):
-        x = self.conv_1(x)
-        x = self.conv_2(x)
+        x = self.conv_1_down(x)
+        x = self.conv_2_down(x)
         x = nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='nearest')
-        x = self.conv_3(x)
+        x = self.conv_3_down(x)
         x = nn.functional.interpolate(x, size=self.embedding_features_size, mode='nearest')
         x = x.view((x.shape[0],-1))
         x = self.fc_1(x)

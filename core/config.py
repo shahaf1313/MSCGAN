@@ -91,7 +91,7 @@ def get_arguments():
 
 
     # Miscellaneous parameters:
-    parser.add_argument('--train_im2im_pyramid', help='Chooses whether to train semseg pyramid or im2im pyramid (defualt is to train semseg).', default=False, action='store_true')
+    parser.add_argument('--train_mode', help='Chooses whether to train semseg UDA pyramid (semseg), im2im pyramid (im2im) or image synthesis pyramid (im_synth).', default='semseg')
     parser.add_argument("--tb_logs_dir", type=str, required=False, default='./runs', help="Path to Tensorboard logs dir.")
     parser.add_argument('--debug_run', default=False, action='store_true')
     parser.add_argument('--debug_stop_iteration', type=int, default=15, help='Iteration number to finish training current scale in debug mode.')
