@@ -52,7 +52,8 @@ def train(opt):
         else:
             Dst_curr, Gst_curr = init_models(opt, use_spade=True)
             # Dts_curr, _ = init_models(opt, use_spade=False)
-            Gts_curr, _ = CreateSemsegModel(opt)
+            # Gts_curr, _ = CreateSemsegModel(opt)
+            Gts_curr = torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
 
 
         if len(opt.gpus) > 1:
@@ -310,7 +311,7 @@ def train_single_scale(netDst, netGst, netGts, Gst: list, Gts: list, Dst: list, 
 def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, opt, real_segmap=None):
     losses = {}
     # train with real image
-    errD_real = -1 * netD(real_images).mean()
+    errD_real = -1 * netD(real_images, real_segmap).mean()
     losses['RealImagesLoss'] = errD_real.item()
     errD_real *=  opt.lambda_adversarial
     errD_real.backward(retain_graph=True)
@@ -321,7 +322,7 @@ def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, o
         curr = from_scales[opt.curr_scale]
         prev = concat_pyramid(Gs, from_scales, opt)
         fake_images = netG(curr, prev, real_segmap)
-    errD_fake = netD(fake_images.detach()).mean()
+    errD_fake = netD(fake_images.detach(), real_segmap).mean()
     losses['FakeImagesLoss'] = errD_fake.item()
     errD_fake *= opt.lambda_adversarial
     errD_fake.backward(retain_graph=True)
@@ -473,7 +474,7 @@ def init_models(opt, use_spade):
             netG = models.UNetGeneratorTwoLayers(opt).to(opt.device)
     elif opt.use_fcc or opt.use_fcc_g:
         netG = models.FCCGenerator(opt, use_spade=use_spade).to(opt.device)
-    else:  # Conditial Generator(!):
+    else:  # Conditional Generator(!):
         if use_spade:
             netG = models.LabelConditionedGenerator(opt).to(opt.device)
         else:

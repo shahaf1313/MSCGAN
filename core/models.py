@@ -47,8 +47,8 @@ class ConvBlockSpade(nn.Module):
             # todo: I tried to remove SPADE @ Last scale because I wanted the model to
             # todo: converge WO it as it did in the pervious scales.
             # todo: uncomment the following line and delete the one after it:
-            # z = self.conv(self.actvn(self.spade(x, seg_map)))
-            z = self.conv(self.actvn(self.norm(x)))
+            z = self.conv(self.actvn(self.spade(x, seg_map)))
+            # z = self.conv(self.actvn(self.norm(x)))
         return z
 
 class SPADE(nn.Module):
@@ -428,12 +428,12 @@ class FCCGenerator(nn.Module):
     def __init__(self, opt, use_spade):
         super(FCCGenerator, self).__init__()
         self.is_initial_scale = opt.curr_scale == 0
-        self.embedding_features_size = [8, 16]
+        self.embedding_features_size = [32, 64]
         self.embedding_channels_size = 64
         self.norm_linear = nn.BatchNorm1d
         self.embedding_size = self.embedding_features_size[0] * self.embedding_features_size[1] * self.embedding_channels_size
-        self.scale_size = [int(opt.scale_factor**(opt.num_scales-opt.curr_scale) * H),
-                           int(opt.scale_factor**(opt.num_scales-opt.curr_scale) * W)]
+        self.scale_size = [int((0.5 if opt.use_half_image_size else 1) * opt.scale_factor**(opt.num_scales-opt.curr_scale) * H),
+                           int((0.5 if opt.use_half_image_size else 1) * opt.scale_factor**(opt.num_scales-opt.curr_scale) * W)]
         assert H == W/2
         self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
 
@@ -445,11 +445,11 @@ class FCCGenerator(nn.Module):
 
             self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//4,
                                          self.embedding_channels_size//2,
-                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num, stride=2)
 
             self.conv_3_down = ConvBlockSpade(self.embedding_channels_size//2,
                                          self.embedding_channels_size,
-                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
+                                         opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num, stride=2)
 
             # Up Conv:
             self.conv_1_up = ConvBlockSpade(self.embedding_channels_size,
@@ -510,27 +510,27 @@ class FCCGenerator(nn.Module):
 
         # Final activation:
         self.final_actvn = nn.Tanh()
-    def forward(self, curr_scale, prev_scale, seg_map=None):
+    def forward(self, curr_scale, prev_scale, segmap=None):
         if self.is_initial_scale:
             x = curr_scale
         else:
             x = torch.cat((curr_scale, prev_scale), 1)
-        x = self.conv_1_down(x)
-        x = self.conv_2_down(x)
-        x = nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='nearest')
-        x = self.conv_3_down(x)
-        x = nn.functional.interpolate(x, size=self.embedding_features_size, mode='nearest')
+        x = self.conv_1_down(x, segmap)
+        x = self.conv_2_down(x, segmap)
+        x = nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='bilinear')
+        x = self.conv_3_down(x, segmap)
+        x = nn.functional.interpolate(x, size=self.embedding_features_size, mode='bilinear')
         x = x.view((x.shape[0],-1))
         x = self.fc_1_down(x)
         x = self.fc_2_down(x)
         x = self.fc_1_up(x)
         x = self.fc_2_up(x)
         x = x.view((x.shape[0], self.embedding_channels_size, self.embedding_features_size[0], self.embedding_features_size[1] ))
-        x = self.conv_1_up(x)
-        x = nn.functional.interpolate(x, scale_factor=1./self.scale_factor, mode='nearest')
-        x = self.conv_2_up(x)
-        x = nn.functional.interpolate(x, size=self.scale_size, mode='nearest')
-        x = self.conv_3_up(x)
+        x = self.conv_1_up(x, segmap)
+        x = nn.functional.interpolate(x, scale_factor=1./self.scale_factor, mode='bilinear')
+        x = self.conv_2_up(x, segmap)
+        x = nn.functional.interpolate(x, size=self.scale_size, mode='bilinear')
+        x = self.conv_3_up(x, segmap)
         x = self.final_actvn(x)
         return x
 
@@ -548,7 +548,7 @@ class WDiscriminator(nn.Module):
         self.tail = nn.Sequential(ConvBlock(opt.base_channels, 1, opt.ker_size, self.images_per_gpu, opt.groups_num),
                                   nn.LeakyReLU(0.2))
 
-    def forward(self, x):
+    def forward(self, x, segmap=None):
         x = self.head(x)
         x = self.body(x)
         x = self.tail(x)
@@ -604,11 +604,11 @@ class WDiscriminatorDownscale(nn.Module):
 class FCCDiscriminator(nn.Module):
     def __init__(self, opt, use_sapde):
         super(FCCDiscriminator, self).__init__()
-        self.embedding_features_size = [8, 16]
+        self.embedding_features_size = [32, 64]
         self.embedding_channels_size = 64
         self.embedding_size = self.embedding_features_size[0] * self.embedding_features_size[1] * self.embedding_channels_size
-        self.scale_size = [opt.scale_factor**(opt.num_scales-opt.curr_scale) * H,
-                           opt.scale_factor**(opt.num_scales-opt.curr_scale) * W]
+        self.scale_size = [int((0.5 if opt.use_half_image_size else 1) * opt.scale_factor**(opt.num_scales-opt.curr_scale) * H),
+                           int((0.5 if opt.use_half_image_size else 1) * opt.scale_factor**(opt.num_scales-opt.curr_scale) * W)]
         assert H == W/2
         self.scale_factor = np.sqrt(self.embedding_features_size[0] / self.scale_size[0])
         if use_sapde:
@@ -620,7 +620,7 @@ class FCCDiscriminator(nn.Module):
                                               self.embedding_channels_size//2,
                                               opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
 
-            self.conv_2_down = ConvBlockSpade(self.embedding_channels_size//2,
+            self.conv_3_down = ConvBlockSpade(self.embedding_channels_size//2,
                                               self.embedding_channels_size,
                                               opt.ker_size, opt.images_per_gpu[opt.curr_scale], opt.groups_num)
         else:
@@ -648,12 +648,12 @@ class FCCDiscriminator(nn.Module):
                                   nn.LeakyReLU(0.2),
                                   nn.Linear(self.embedding_size//2**8, 1, bias=True))
 
-    def forward(self, x):
-        x = self.conv_1_down(x)
-        x = self.conv_2_down(x)
-        x = nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='nearest')
-        x = self.conv_3_down(x)
-        x = nn.functional.interpolate(x, size=self.embedding_features_size, mode='nearest')
+    def forward(self, x, segmap=None):
+        x = self.conv_1_down(x, segmap)
+        x = self.conv_2_down(x, segmap)
+        x = nn.functional.interpolate(x, scale_factor=self.scale_factor, mode='bilinear')
+        x = self.conv_3_down(x, segmap)
+        x = nn.functional.interpolate(x, size=self.embedding_features_size, mode='bilinear')
         x = x.view((x.shape[0],-1))
         x = self.fc_1(x)
         x = self.fc_2(x)
