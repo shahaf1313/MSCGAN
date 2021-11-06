@@ -272,3 +272,48 @@ class runningScore(object):
     def reset(self):
         self.confusion_matrix = np.zeros((self.n_classes, self.n_classes))
 
+def norm_image(im, norm_type='tanh_norm'):
+    if norm_type == 'tanh_norm':
+        out = (im + 1) / 2
+    elif norm_type == 'general_norm':
+        out = (im - im.min())
+        out = out / out.max()
+    else:
+        raise NotImplemented()
+    assert torch.max(out) <= 1 and torch.min(out) >= 0
+    return out
+
+def calculte_cs_validation_accuracy(semseg_net, target_val_loader, epoch_num, tb_path, device):
+    from torch.utils.tensorboard import SummaryWriter
+    semseg_net.eval()
+    tb = SummaryWriter(tb_path)
+    with torch.no_grad():
+        running_metrics_val = runningScore(NUM_CLASSES)
+        cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
+        for val_batch_num, (target_images, target_labels) in enumerate(target_val_loader):
+            target_images = target_images.to(device)
+            target_labels = target_labels.to(device)
+            with torch.no_grad():
+                pred_softs = semseg_net(target_images)
+                pred_labels = torch.argmax(pred_softs, dim=1)
+                cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
+                running_metrics_val.update(target_labels.cpu().numpy(), pred_labels.cpu().numpy())
+                if val_batch_num == 0:
+                    t = norm_image(target_images[0])
+                    t_lbl = colorize_mask(target_labels[0])
+                    pred_lbl = colorize_mask(pred_labels[0])
+                    tb.add_image('Semseg/Validtaion/target', t, epoch_num)
+                    tb.add_image('Semseg/Validtaion/target_label', t_lbl, epoch_num)
+                    tb.add_image('Semseg/Validtaion/prediction_label', pred_lbl, epoch_num)
+        iou, miou = compute_iou_torch(cm)
+
+        # proda's calc:
+        score, class_iou = running_metrics_val.get_scores()
+        for k, v in score.items():
+            print(k, v)
+
+        for k, v in class_iou.items():
+            print(k, v)
+
+        running_metrics_val.reset()
+    return iou, miou, cm

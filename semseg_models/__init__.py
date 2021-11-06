@@ -5,7 +5,7 @@ import torch.optim as optim
 import torch.nn as nn
 import os
 from core.constants import NUM_CLASSES
-from semseg_models.build import build_feature_extractor, build_classifier, ASPP_Classifier_V2
+# from semseg_models.build import build_feature_extractor, build_classifier, ASPP_Classifier_V2
 import torch
 
 def CreateSemsegModel(args):
@@ -59,18 +59,20 @@ def CreateSemsegPyramidModel(args, dataset_name=None):
         classifier.to(args.device)
 
     elif args.model == 'DeepLab':
-        model_name = 'deeplab_resnet101'
-        feature_extractor = build_feature_extractor(model_name)
-        feature_extractor.to(args.device)
-        classifier = build_classifier(model_name)
-        classifier.to(args.device)
+        pass
+        # model_name = 'deeplab_resnet101'
+        # feature_extractor = build_feature_extractor(model_name)
+        # feature_extractor.to(args.device)
+        # classifier = build_classifier(model_name)
+        # classifier.to(args.device)
 
     elif args.model == 'VGG':
-        model_name = 'deeplab_vgg16'
-        feature_extractor = build_feature_extractor(model_name)
-        feature_extractor.to(args.device)
-        classifier = build_classifier(model_name)
-        classifier.to(args.device)
+        pass
+        # model_name = 'deeplab_vgg16'
+        # feature_extractor = build_feature_extractor(model_name)
+        # feature_extractor.to(args.device)
+        # classifier = build_classifier(model_name)
+        # classifier.to(args.device)
     else:
         raise NotImplementedError
 

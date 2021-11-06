@@ -120,6 +120,10 @@ class Logger(object):
         self.log.flush()
 
 def post_config(opt):
+        args = ''
+        for s in sys.argv:
+            args += s + ' '
+        opt.args = args
         # init fixed parameters
         opt.pretrained_deeplabv2_on_gta_miou_70 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.7mIoU_on_GTA.pth'
         opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])
