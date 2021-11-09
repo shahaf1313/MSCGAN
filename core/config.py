@@ -32,6 +32,7 @@ def get_arguments():
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--batch_size_list', type=int, nargs='+', help="batch size in each one of the scales", default=[0])
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
+    parser.add_argument('--use_target_label_loss', default=False, action='store_true', help='Use target label loss in the training process.')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs before switching to label conditioned generator.')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
     parser.add_argument('--use_fcc', default=False, action='store_true', help='Uses FC and Convolutional discriminator and generator')
@@ -51,7 +52,7 @@ def get_arguments():
     parser.add_argument('--max_size', type=int, help='image maximal size at the largest scale', default=None)
     parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=None)
     parser.add_argument('--groups_num', type=int, help='number of groups in Group Norm', default=None)
-    parser.add_argument('--base_channels', type=int, help='number of channels in the generator and discriminator.', default=32)
+    parser.add_argument('--base_channels_list', type=int, nargs='+', help='number of channels in the generator and discriminator.', default=[])
 
     # optimization hyper parameters:
     parser.add_argument('--epochs_per_scale', type=int, default=12, help='number of epochs to train per scale')
@@ -81,6 +82,7 @@ def get_arguments():
     parser.add_argument("--semseg_model_path", type=str, default='', help="path to folder that contains classifier and feature extractor weights.")
     parser.add_argument("--semseg_model_epoch_to_resume", type=int, default=-1, help='Epoch that checkpoint to semseg net saved from')
     parser.add_argument('--use_distillation', default=False, action='store_true', help='Uses distillation with trusted labels.')
+    parser.add_argument('--use_focal_static_loss', default=False, action='store_true', help='Uses static focal loss for every epoch after 40% of the training of the last scale.')
     parser.add_argument('--load_only_gta_weights', default=False, action='store_true', help='Loads only source (GTA5) semeseg weigths.')
     parser.add_argument('--lr_semseg', type=float, default=0.00025, help='learning rate, default=0.00025')
     parser.add_argument("--weight-decay", type=float, default=0.0005, help="Regularisation parameter for L2-loss.")

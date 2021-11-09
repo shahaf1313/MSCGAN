@@ -12,7 +12,7 @@ from core.models import VGGLoss
 import time
 from core.constants import H, W
 from core.functions import imresize_torch, colorize_mask, reset_grads, save_networks, calc_gradient_penalty, GeneratePyramid, one_hot_encoder, compute_iou_torch, \
-    compute_cm_batch_torch, runningScore, norm_image
+    compute_cm_batch_torch, runningScore, norm_image, encode_semseg_out
 from torch.utils.tensorboard import SummaryWriter
 import os
 
@@ -37,6 +37,7 @@ def train(opt):
     while scale_num < opt.num_scales + 1:
         opt.curr_scale = scale_num
         opt.last_scale = opt.curr_scale == opt.num_scales
+        opt.base_channels = opt.base_channels_list[0]  if len(opt.base_channels_list) == 1 else opt.base_channels_list[opt.curr_scale]
         opt.outf = '%s/%d' % (opt.out_, scale_num)
         try:
             os.makedirs(opt.outf)
@@ -309,15 +310,16 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     opt.tb.add_image('Scale%d/LabelsCyclic/source_label' % opt.curr_scale, s_label, save_pics_int * opt.save_pics_rate)
                     if not opt.warmup:
                         sitis_label = colorize_mask(cyc_images['sitis_softs'].argmax(1)[0])
-                        # softs_max_target = torch.nn.functional.softmax(cyc_images['t_softs'], dim=1)
-                        # hist_values_target = softs_max_target.max(dim=1)[0][0]
-                        # t_label = colorize_mask(cyc_images['t_softs'].argmax(1)[0])
-                        # tisit_label = colorize_mask(cyc_images['tisit_softs'].argmax(1)[0])
                         opt.tb.add_image('Scale%d/LabelsCyclic/sitis_label' % opt.curr_scale, sitis_label, save_pics_int * opt.save_pics_rate)
-                        # opt.tb.add_image('Scale%d/target_values' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, dataformats='HW')
-                        # opt.tb.add_histogram('Scale%d/target_histogram' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, bins='auto')
-                        # opt.tb.add_image('Scale%d/LabelsCyclic/target_label' % opt.curr_scale, t_label, save_pics_int * opt.save_pics_rate)
-                        # opt.tb.add_image('Scale%d/LabelsCyclic/tisit_label' % opt.curr_scale, tisit_label, save_pics_int * opt.save_pics_rate)
+                        if opt.use_target_label_loss:
+                            softs_max_target = torch.nn.functional.softmax(cyc_images['t_softs'], dim=1)
+                            hist_values_target = softs_max_target.max(dim=1)[0][0]
+                            t_label = colorize_mask(cyc_images['t_softs'].argmax(1)[0])
+                            tisit_label = colorize_mask(cyc_images['tisit_softs'].argmax(1)[0])
+                            opt.tb.add_image('Scale%d/target_values' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, dataformats='HW')
+                            opt.tb.add_histogram('Scale%d/target_histogram' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, bins='auto')
+                            opt.tb.add_image('Scale%d/LabelsCyclic/target_label' % opt.curr_scale, t_label, save_pics_int * opt.save_pics_rate)
+                            opt.tb.add_image('Scale%d/LabelsCyclic/tisit_label' % opt.curr_scale, tisit_label, save_pics_int * opt.save_pics_rate)
 
                 save_pics_int += 1
 
@@ -338,7 +340,10 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             if miou > opt.best_miou:
                 opt.best_miou = miou
                 save_networks(os.path.join(opt.checkpoints_dir, '%.2f_mIoU_model' % (miou)), netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
-
+            # Static Focal Loss: set weight vector for next epoch
+            # Only after training has passed 40% of the epochs in the last scale.
+            if opt.use_focal_static_loss and epoch_num >= int(opt.epochs_per_scale*0.4):
+                semseg_cs.ce_loss.weight = (1-miou)**2
         epoch_num += 1
 
     save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
@@ -442,19 +447,19 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
     loss_tst *= opt.lambda_cyclic
     loss_tst.backward(retain_graph=opt.last_scale and not opt.warmup)
 
-    # # Target Label Cyclic Loss:
-    # if opt.last_scale and not opt.warmup:
-    #     # if segmap_target == None:
-    #     #     segmap_target = encode_semseg_out(semseg_net(target_batch), opt.ignore_threshold)
-    #     target_softs = semseg_cs(target_batch).detach()
-    #     target_segmap = encode_semseg_out(target_softs)
-    #     images['t_softs'] = target_softs
-    #     tisit_segmap = encode_semseg_out(semseg_cs(tisit_image))
-    #     images['tisit_softs'] = tisit_segmap
-    #     loss_labels_target = criterion_target_labels(tisit_segmap, target_segmap)
-    #     losses['TargetLabelLoss'] = loss_labels_target.item()
-    #     loss_labels_target *= 0.1 * opt.lambda_labels
-    #     loss_labels_target.backward()
+    # Target Label Cyclic Loss:
+    if opt.use_target_label_loss and opt.last_scale and not opt.warmup:
+        # if segmap_target == None:
+        #     segmap_target = encode_semseg_out(semseg_net(target_batch), opt.ignore_threshold)
+        target_softs = semseg_cs(target_batch).detach()
+        target_segmap = encode_semseg_out(target_softs)
+        images['t_softs'] = target_softs
+        tisit_segmap = encode_semseg_out(semseg_cs(tisit_image))
+        images['tisit_softs'] = tisit_segmap
+        loss_labels_target = criterion_target_labels(tisit_segmap, target_segmap)
+        losses['TargetLabelLoss'] = loss_labels_target.item()
+        loss_labels_target *= opt.lambda_labels
+        loss_labels_target.backward()
     losses['TotalLoss'] = losses['LossTST'] + losses['LossSTS']
 
     return losses, images

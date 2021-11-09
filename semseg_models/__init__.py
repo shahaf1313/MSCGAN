@@ -1,4 +1,5 @@
 from semseg_models.deeplab import Deeplab
+from semseg_models.deeplabv2_gn import DeeplabV2_GN
 from semseg_models.deeplabv2 import DeeplabV2
 from semseg_models.fcn8s import VGG16_FCN8s
 import torch.optim as optim
@@ -16,11 +17,17 @@ def CreateSemsegModel(args):
                               lr=args.lr_semseg, momentum=args.momentum, weight_decay=args.weight_decay)
         optimizer.zero_grad()
 
-    if args.model == 'DeepLabV2':
+    if args.model == 'DeepLabV2_GN':
         if args.images_per_gpu[args.curr_scale] > 16 or args.force_bn_in_deeplab:
-            model = DeeplabV2(BatchNorm=True, num_classes=NUM_CLASSES)
+            model = DeeplabV2_GN(BatchNorm=True, num_classes=NUM_CLASSES)
         elif args.images_per_gpu[args.curr_scale] <= 16 or args.force_gn_in_deeplab:
-            model = DeeplabV2(BatchNorm=False, num_classes=NUM_CLASSES)
+            model = DeeplabV2_GN(BatchNorm=False, num_classes=NUM_CLASSES)
+        optimizer = optim.SGD(model.optim_parameters(args),
+                              lr=args.lr_semseg, momentum=args.momentum, weight_decay=args.weight_decay)
+        optimizer.zero_grad()
+
+    if args.model == 'DeepLabV2':
+        model = DeeplabV2(BatchNorm=nn.BatchNorm2d, num_classes=NUM_CLASSES)
         optimizer = optim.SGD(model.optim_parameters(args),
                               lr=args.lr_semseg, momentum=args.momentum, weight_decay=args.weight_decay)
         optimizer.zero_grad()
