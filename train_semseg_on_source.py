@@ -7,8 +7,9 @@ def main(opt):
     opt.epoch_size = len(source_train_loader.dataset)
     opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, opt.batch_size, opt)
     semseg_net, semseg_optimizer = CreateSemsegModel(opt)
+    semseg_net = torch.nn.DataParallel(semseg_net)
 
-    print('Architecture of Semantic Segmentation network:\n' + str(semseg_net))
+    print('Architecture of Semantic Segmentation network:\n' + str(semseg_net.module))
     opt.tb = SummaryWriter(os.path.join(opt.tb_logs_dir, '%sGPU%d' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])))
 
     steps = 0
@@ -62,7 +63,7 @@ def main(opt):
         iou_bn, miou_bn, cm_bn = calculte_validation_accuracy(semseg_net, source_val_loader, opt, epoch_num)
         save_epoch_accuracy(opt.tb, 'Validtaion', iou_bn, miou_bn, epoch_num)
         if epoch_num > 15:
-            torch.save(semseg_net, '%s/semseg_net_epoch%d.pth' % (opt.out, epoch_num))
+            torch.save(semseg_net.module, '%s/semseg_trained_on_gta.pth' % (opt.out_folder))
         epoch_num += 1
 
     opt.tb.close()
@@ -102,7 +103,6 @@ def set_pics_save_rate(pics_per_epoch, batch_size, opt):
 if __name__ == "__main__":
     from core.config import get_arguments, post_config
     parser = get_arguments()
-    parser.add_argument('--use_gn_in_semseg', default=False, action='store_true')
     opt = parser.parse_args()
     opt = post_config(opt)
     from semseg_models import CreateSemsegModel

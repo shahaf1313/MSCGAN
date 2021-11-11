@@ -43,8 +43,6 @@ def CreateSemsegModel(args):
         lr=args.lr_semseg,
         betas=(0.9, 0.99))
         optimizer.zero_grad()
-    if args.semseg_model_path != '':
-        model=torch.load(args.pretrained_semseg_path)
     model.to(args.device)
     return model, optimizer
 

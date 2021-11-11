@@ -38,7 +38,7 @@ def train(opt):
         opt.curr_scale = scale_num
         opt.last_scale = opt.curr_scale == opt.num_scales
         opt.base_channels = opt.base_channels_list[0]  if len(opt.base_channels_list) == 1 else opt.base_channels_list[opt.curr_scale]
-        opt.outf = '%s/%d' % (opt.out_, scale_num)
+        opt.outf = '%s/%d' % (opt.out_folder, scale_num)
         try:
             os.makedirs(opt.outf)
         except OSError:
@@ -90,10 +90,10 @@ def train(opt):
         Dts.append(Dts_curr)
 
         if not opt.debug_run:
-            torch.save(Gst, '%s/Gst.pth' % (opt.out_))
-            torch.save(Gts, '%s/Gts.pth' % (opt.out_))
-            torch.save(Dst, '%s/Dst.pth' % (opt.out_))
-            torch.save(Dts, '%s/Dts.pth' % (opt.out_))
+            torch.save(Gst, '%s/Gst.pth' % (opt.out_folder))
+            torch.save(Gts, '%s/Gts.pth' % (opt.out_folder))
+            torch.save(Dst, '%s/Dst.pth' % (opt.out_folder))
+            torch.save(Dts, '%s/Dts.pth' % (opt.out_folder))
 
         opt.prev_base_channels = opt.base_channels
         resume_first_iteration = False
@@ -396,7 +396,7 @@ def adversarial_generative_train(netG, netD, Gs, source_scales, opt, source_cont
 
 def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
                            target_scales, currGts, Gts_pyramid, opt,
-                           source_label=None, source_segmap=None,
+                           source_label, source_segmap,
                            semseg_cs=None, semseg_gta=None):
     losses = {}
     images = {}

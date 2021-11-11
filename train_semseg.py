@@ -96,11 +96,11 @@ def main():
         save_epoch_accuracy(opt.tb, 'Validtaion', iou, miou, epoch_num)
         print('train semseg: average accuracy of epoch #%d on target domain: mIoU = %2f' % (epoch_num, miou))
         if epoch_num % 4 == 0:
-            torch.save(semseg_net, '%s/%s_AdaptedToTarget_Epoch%d.pth' % (opt.out_, opt.model, epoch_num))
+            torch.save(semseg_net, '%s/%s_AdaptedToTarget_Epoch%d.pth' % (opt.out_folder, opt.model, epoch_num))
         epoch_num += 1
 
     #Save final network:
-    torch.save(semseg_net, '%s/%s_AdaptedToTarget_Final.pth' % (opt.out_, opt.model))
+    torch.save(semseg_net, '%s/%s_AdaptedToTarget_Final.pth' % (opt.out_folder, opt.model))
 
     #Test:
     print('train semseg: starting final accuracy calculation...')
