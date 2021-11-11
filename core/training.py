@@ -449,14 +449,11 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
 
     # Target Label Cyclic Loss:
     if opt.use_target_label_loss and opt.last_scale and not opt.warmup:
-        # if segmap_target == None:
-        #     segmap_target = encode_semseg_out(semseg_net(target_batch), opt.ignore_threshold)
-        target_softs = semseg_cs(target_batch).detach()
-        target_segmap = encode_semseg_out(target_softs)
+        target_softs = semseg_cs(target_batch)
         images['t_softs'] = target_softs
-        tisit_segmap = encode_semseg_out(semseg_cs(tisit_image))
-        images['tisit_softs'] = tisit_segmap
-        loss_labels_target = criterion_target_labels(tisit_segmap, target_segmap)
+        tisit_softs = semseg_cs(tisit_image)
+        images['tisit_softs'] = tisit_softs
+        loss_labels_target = criterion_target_labels(target_softs, tisit_softs)
         losses['TargetLabelLoss'] = loss_labels_target.item()
         loss_labels_target *= opt.lambda_labels
         loss_labels_target.backward()
