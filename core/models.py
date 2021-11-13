@@ -24,7 +24,7 @@ class ConvBlockSpade(nn.Module):
     def __init__(self, in_channel, out_channel, ker_size, im_per_gpu, groups_num, padd=1, stride=1):
         super(ConvBlockSpade, self).__init__()
         # Normalization:
-        if in_channel % groups_num == 0:
+        if  in_channel % groups_num == 0:
             self.norm = nn.GroupNorm(num_groups=groups_num, num_channels=in_channel, affine=True)
             self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=NUM_CLASSES)
         else: #don't normalize only in the head module, where you have only 3 channels..
@@ -33,16 +33,19 @@ class ConvBlockSpade(nn.Module):
         # Activation:
         self.actvn = nn.LeakyReLU(0.2)
         # Convolution:
-        self.conv_spade = nn.Conv2d(in_channel, out_channel, kernel_size=ker_size, stride=stride, padding=padd)
-        self.conv_norm = nn.Conv2d(in_channel, out_channel, kernel_size=ker_size, stride=stride, padding=padd)
+        self.conv = nn.Conv2d(in_channel, out_channel, kernel_size=ker_size, stride=stride, padding=padd)
 
     def forward(self, x, seg_map=None):
         if self.norm==None: #Don't use norm layer:
-            z = self.actvn(self.conv_norm(x))
+            z = self.actvn(self.conv(x))
         elif seg_map==None:
-            z = self.conv_norm(self.actvn(self.norm(x)))
+            z = self.conv(self.actvn(self.norm(x)))
         else:
-            z = self.conv_spade(self.actvn(self.spade(x, seg_map)))
+            # todo: I tried to remove SPADE @ Last scale because I wanted the model to
+            # todo: converge WO it as it did in the pervious scales.
+            # todo: uncomment the following line and delete the one after it:
+            # z = self.conv(self.actvn(self.spade(x, seg_map)))
+            z = self.conv(self.actvn(self.norm(x)))
         return z
 
 class SPADE(nn.Module):
