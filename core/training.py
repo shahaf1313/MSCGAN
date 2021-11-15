@@ -105,10 +105,20 @@ def train(opt):
 
 def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list,
                        opt, resume=False, epoch_num_to_resume=1, semseg_cs=None):
+    gst_params = []
+    for net in Gst:
+        gst_params += list(net.parameters())
+    gst_params += list(netGst.parameters())
+
+    gts_params = []
+    for net in Gts:
+        gts_params += list(net.parameters())
+    gts_params += list(netGts.parameters())
+
     optimizerDst = optim.Adam(netDst.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
-    optimizerGst = optim.Adam(netGst.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
+    optimizerGst = optim.Adam(gst_params, lr=opt.lr_g, betas=(opt.beta1, 0.999))
     optimizerDts = optim.Adam(netDts.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
-    optimizerGts = optim.Adam(netGts.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
+    optimizerGts = optim.Adam(gts_params, lr=opt.lr_g, betas=(opt.beta1, 0.999))
     if opt.last_scale:
         optimizerSemsegCS = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
                                     weight_decay=opt.weight_decay)
@@ -153,6 +163,9 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             netGst.train()
             netDts.train()
             netGts.train()
+            for scale_Gst, scale_Gts in zip(Gst, Gts):
+                scale_Gst.train()
+                scale_Gts.train()
             if opt.last_scale:
                 semseg_cs.train()
 
@@ -407,13 +420,13 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
     target_batch = target_scales[-1]
 
     # source in target:
-    with torch.no_grad():
-        prev_sit = concat_pyramid(Gst_pyramid, source_scales, opt)
+    # with torch.no_grad():
+    prev_sit = concat_pyramid(Gst_pyramid, source_scales, opt)
     sit_image = currGst(source_batch, prev_sit, source_segmap)
     images['sit'] = sit_image
     with torch.no_grad():
         generated_pyramid_sit = GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
-        prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt)
+    prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt)
     # source in target in source:
     sitis_image = currGts(sit_image, prev_sit_generated, source_segmap)
     images['sitis'] = sitis_image
@@ -432,13 +445,13 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
 
 
     # traget in source:
-    with torch.no_grad():
-        prev_tis = concat_pyramid(Gts_pyramid, target_scales, opt)
+    # with torch.no_grad():
+    prev_tis = concat_pyramid(Gts_pyramid, target_scales, opt)
     tis_image = currGts(target_batch, prev_tis, None)
     images['tis'] = tis_image
     with torch.no_grad():
         generated_pyramid_tis = GeneratePyramid(tis_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
-        prev_tis_generated = concat_pyramid(Gst_pyramid, generated_pyramid_tis, opt)
+    prev_tis_generated = concat_pyramid(Gst_pyramid, generated_pyramid_tis, opt)
     # target in source in target:
     tisit_image = currGst(tis_image, prev_tis_generated, None)
     images['tisit'] = tisit_image
@@ -482,20 +495,20 @@ def real_semantic_segmentation_loss(input_target_image, trusted_label, semseg_ne
 def concat_pyramid(Gs, sources, opt):
     if len(Gs) == 0:
         return torch.zeros_like(sources[0])
-    with torch.no_grad():
-        G_z = sources[0]
-        # labels = [None] * len(sources) if labels == None else labels
-        for G, source_curr, source_next in zip(Gs, sources, sources[1:]):
-            G_z = G_z[:, :, 0:source_curr.shape[2], 0:source_curr.shape[3]]
-            G_z = G(source_curr, G_z.detach())
-            # G_z = imresize(G_z, 1 / opt.scale_factor, opt)
-            G_z = imresize_torch(G_z, 1 / opt.scale_factor, mode='bicubic')
-            G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
+    # with torch.no_grad():
+    G_z = sources[0]
+    # labels = [None] * len(sources) if labels == None else labels
+    for G, source_curr, source_next in zip(Gs, sources, sources[1:]):
+        G_z = G_z[:, :, 0:source_curr.shape[2], 0:source_curr.shape[3]]
+        G_z = G(source_curr, G_z.detach())
+        # G_z = imresize(G_z, 1 / opt.scale_factor, opt)
+        G_z = imresize_torch(G_z, 1 / opt.scale_factor, mode='bicubic')
+        G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
     return G_z.detach()
 
 def generate_image(netG, curr_images, Gs, scales, cond_image, opt):
-    with torch.no_grad():
-        prevs = concat_pyramid(Gs, scales, opt)
+    # with torch.no_grad():
+    prevs = concat_pyramid(Gs, scales, opt)
     fake_images = netG(curr_images, prevs, cond_image)
 
     return fake_images
@@ -576,18 +589,17 @@ def calculte_validation_accuracy(semseg_net, target_val_loader, epoch_num, opt):
                 break
             target_images = target_images.to(opt.device)
             target_labels = target_labels.to(opt.device)
-            with torch.no_grad():
-                pred_softs = semseg_net(target_images)
-                pred_labels = torch.argmax(pred_softs, dim=1)
-                cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
-                running_metrics_val.update(target_labels.cpu().numpy(), pred_labels.cpu().numpy())
-                if val_batch_num == 0:
-                    t = norm_image(target_images[0])
-                    t_lbl = colorize_mask(target_labels[0])
-                    pred_lbl = colorize_mask(pred_labels[0])
-                    opt.tb.add_image('Semseg/Validtaion/target', t, epoch_num)
-                    opt.tb.add_image('Semseg/Validtaion/target_label', t_lbl, epoch_num)
-                    opt.tb.add_image('Semseg/Validtaion/prediction_label', pred_lbl, epoch_num)
+            pred_softs = semseg_net(target_images)
+            pred_labels = torch.argmax(pred_softs, dim=1)
+            cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
+            running_metrics_val.update(target_labels.cpu().numpy(), pred_labels.cpu().numpy())
+            if val_batch_num == 0:
+                t = norm_image(target_images[0])
+                t_lbl = colorize_mask(target_labels[0])
+                pred_lbl = colorize_mask(pred_labels[0])
+                opt.tb.add_image('Semseg/Validtaion/target', t, epoch_num)
+                opt.tb.add_image('Semseg/Validtaion/target_label', t_lbl, epoch_num)
+                opt.tb.add_image('Semseg/Validtaion/prediction_label', pred_lbl, epoch_num)
         iou, miou = compute_iou_torch(cm)
 
         # proda's calc:
