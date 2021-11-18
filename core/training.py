@@ -91,7 +91,7 @@ def train(opt):
         for net in scale_nets:
             net = reset_grads(net, False)
             net.eval()
-        Dst_curr, Gst_curr, Dts_curr, Gts_curr, Dcs, Dgta = scale_nets
+        Dst_curr, Gst_curr, Dts_curr, Gts_curr, Dcs_curr, Dgta_curr = scale_nets
 
         Gst.append(Gst_curr)
         Gts.append(Gts_curr)
@@ -618,6 +618,8 @@ def load_trained_networks(opt):
 
     if os.path.isfile(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth')):
         semseg_cs = torch.load(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth'))
+        if not hasattr(semseg_cs, 'ce_loss'):
+            semseg_cs.ce_loss = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
     else:
         semseg_cs = None
 
