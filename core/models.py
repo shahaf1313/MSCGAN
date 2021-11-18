@@ -506,11 +506,11 @@ class FCCGenerator(nn.Module):
 
 # Discriminators:
 class WDiscriminator(nn.Module):
-    def __init__(self, opt):
+    def __init__(self, opt, is_semseg_discriminator=False):
         super(WDiscriminator, self).__init__()
         self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
         num_layer_in_body = opt.num_layer if opt.curr_scale >= opt.num_scales - 1 else opt.num_layer-2
-        self.head = ConvBlock(opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.head = ConvBlock(opt.nc_im if not is_semseg_discriminator else NUM_CLASSES, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
         self.body = nn.Sequential()
         for i in range(num_layer_in_body):
             block = ConvBlock(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)

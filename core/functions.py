@@ -93,7 +93,8 @@ def read_image2np(opt):
     return x
 
 
-def save_networks(path, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs=None):
+def save_networks(path, netDst, netGst, netDts, netGts, netDcs, netDgta,
+                  Gst, Gts, Dst, Dts, Dcs, Dgta, opt, semseg_cs=None):
     if not opt.debug_run:
         try:
             os.makedirs(path)
@@ -104,6 +105,8 @@ def save_networks(path, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt,
             torch.save(Gst + [netGst.module], '%s/Gst.pth' % (path))
             torch.save(Dts + [netDts.module], '%s/Dts.pth' % (path))
             torch.save(Gts + [netGts.module], '%s/Gts.pth' % (path))
+            torch.save(Dcs + [netDcs.module], '%s/Dcs.pth' % (path))
+            torch.save(Dgta + [netDgta.module], '%s/Dgta.pth' % (path))
             if semseg_cs != None:
                 torch.save(semseg_cs.module, '%s/semseg_cs.pth' % (path))
         else:
@@ -111,6 +114,8 @@ def save_networks(path, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt,
             torch.save(Gst + [netGst], '%s/Gst.pth' % (path))
             torch.save(Dts + [netDts], '%s/Dts.pth' % (path))
             torch.save(Gts + [netGts], '%s/Gts.pth' % (path))
+            torch.save(Dcs + netDcs, '%s/Dcs.pth' % (path))
+            torch.save(Dgta + netDgta, '%s/Dgta.pth' % (path))
             if semseg_cs != None:
                 torch.save(semseg_cs, '%s/semseg_cs.pth' % (path))
 

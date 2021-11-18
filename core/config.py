@@ -25,7 +25,7 @@ def get_arguments():
     parser.add_argument("--src_data_list", type=str, default='./dataset/gta5_list/', help="Path to folder that contains a file with a list of images from the source dataset. File named set.txt, where set is train/val/test.")
     parser.add_argument("--trg_data_dir", type=str, default='/home/shahaf/data/cityscapes', help="Path to the directory containing the target dataset.")
     parser.add_argument("--trg_data_list", type=str, default='./dataset/cityscapes_list/', help="Path to folder that contains a file with a list of images from the target dataset. File named set.txt, where set is train/val/test.")
-    parser.add_argument("--num_workers", type=int, default=16, help="Number of threads for each worker")
+    parser.add_argument("--num_workers", type=int, default=4, help="Number of threads for each worker")
 
     # networks parameters:
     parser.add_argument('--batch_size', type=int, default=1)
@@ -38,24 +38,23 @@ def get_arguments():
     parser.add_argument('--use_fcc_d', default=False, action='store_true', help='Uses FC and Convolutional discriminator')
     parser.add_argument('--use_fcc_g', default=False, action='store_true', help='Uses FC and Convolutional generator')
     parser.add_argument('--pool_type', type=str, default='avg', help='Determines pooling type in the FCC discriminator (max for max pool, avg for average pool')
-    parser.add_argument('--nfc', type=int, default=1, help='Number of filter channels. The smallest scale will have nfc*16 channels. Each scales number of channels increases by 16. Default: 1')
     parser.add_argument('--ker_size', type=int, help='kernel size', default=3)
     parser.add_argument('--num_layer', type=int, help='number of layers', default=5)
     parser.add_argument('--stride', help='stride', default=1)
     parser.add_argument('--padd_size', type=int, help='net pad size', default=1)  # math.floor(opt.ker_size/2)
 
     # pyramid parameters:
-    parser.add_argument('--scale_factor', type=float, help='pyramid scale factor', default=0.75)  # pow(0.5,1/6))
+    parser.add_argument('--scale_factor', type=float, help='pyramid scale factor', default=0.5)
     parser.add_argument('--use_half_image_size', default=False, action='store_true')
-    parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=None)
-    parser.add_argument('--groups_num', type=int, help='number of groups in Group Norm', default=None)
+    parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=2)
+    parser.add_argument('--groups_num', type=int, help='number of groups in Group Norm', default=8)
     parser.add_argument('--base_channels_list', type=int, nargs='+', help='number of channels in the generator and discriminator.', default=[])
 
     # optimization hyper parameters:
     parser.add_argument('--epochs_per_scale', type=int, default=12, help='number of epochs to train per scale')
     parser.add_argument('--gamma', type=float, help='scheduler gamma', default=0.1)
-    parser.add_argument('--lr_g', type=float, default=0.00025, help='learning rate, default=0.00025')
-    parser.add_argument('--lr_d', type=float, default=0.00025, help='learning rate, default=0.00025')
+    parser.add_argument('--lr_g', type=float, default=0.0002, help='learning rate, default=0.00025')
+    parser.add_argument('--lr_d', type=float, default=0.0002, help='learning rate, default=0.00025')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam. default=0.9')
     parser.add_argument('--Gsteps', type=int, help='Generator inner steps', default=1)
     parser.add_argument('--Dsteps', type=int, help='Discriminator inner steps', default=1)
@@ -66,9 +65,9 @@ def get_arguments():
     parser.add_argument('--lambda_style', type=float, help='Style loss weight', default=1)
     parser.add_argument('--content_layers', type=int, nargs='+', help='Layer indices to extract content features', default=[15])
     parser.add_argument('--style_layers', type=int, nargs='+', help='Layer indices to extract style features', default=[3, 8, 15, 22])
-    parser.add_argument('--content_weight', type=float, help='Content loss weight', default=1.0)
-    parser.add_argument('--style_weight', type=float, help='style loss weight', default=30.0)
-    parser.add_argument('--tv_weight', type=float, help='tv loss weight', default=1.0)
+    parser.add_argument('--content_weight', type=float, help='Content loss weight', default=1/30.0)
+    parser.add_argument('--style_weight', type=float, help='style loss weight', default=1.0)
+    parser.add_argument('--tv_weight', type=float, help='tv loss weight', default=1/30.0)
 
     # Semseg network parameters:
     parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLabV2, DeepLab and VGG")

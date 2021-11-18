@@ -10,6 +10,7 @@ from core.style_transfer import StyleTransferLoss
 import numpy as np
 from core.models import VGGLoss
 import time
+import copy
 from core.constants import H, W
 from core.functions import imresize_torch, colorize_mask, reset_grads, save_networks, calc_gradient_penalty, GeneratePyramid, one_hot_encoder, compute_iou_torch, \
     compute_cm_batch_torch, runningScore, norm_image, encode_semseg_out
@@ -21,16 +22,24 @@ def train(opt):
     opt.best_miou = BEST_MIOU
     semseg_cs = None
     if opt.continue_train_from_path != '':
-        Gst, Gts, Dst, Dts, semseg_cs = load_trained_networks(opt)
+        Gst, Gts, Dst, Dts, semseg_cs, Dcs, Dgta = load_trained_networks(opt)
         # todo: add loading semseg network
-        assert len(Gst) == len(Gts) == len(Dst) == len(Dts)
+        assert len(Gst) == len(Gts) == len(Dst) == len(Dts) #== len(Dcs) == len(Dgta)
         scale_num = len(Gst) - 1 if opt.resume_to_epoch > 0 else len(Gst)
         resume_first_iteration = True if opt.resume_to_epoch > 0 else False
         opt.resume_to_epoch = opt.resume_to_epoch if opt.resume_to_epoch > 0 else 1
+        #todo: delete after first full training!!!
+        if Dcs == None and Dgta == None:
+            opt.base_channels = opt.base_channels_list[0]
+            _, _, dcs = init_models(opt)
+            _, _, dgta = init_models(opt)
+            Dcs = [None, None, dcs]
+            Dgta = [None, None, dgta]
     else:
         scale_num = 0
         Gst, Gts = [], []
         Dst, Dts = [], []
+        Dcs, Dgta = [], []
         resume_first_iteration = False
 
     opt.tb = SummaryWriter(os.path.join(opt.tb_logs_dir, opt.folder_string))
@@ -46,17 +55,16 @@ def train(opt):
 
         if resume_first_iteration:
             curr_nets = []
-            for net_list in [Dst, Gst, Dts, Gts]:
+            for net_list in [Dst, Gst, Dts, Gts, Dcs, Dgta]:
                 curr_net = net_list[scale_num].train()
                 curr_nets.append(reset_grads(curr_net, True))
                 net_list.remove(net_list[scale_num])
             Dst_curr, Gst_curr = curr_nets[0], curr_nets[1]
             Dts_curr, Gts_curr = curr_nets[2], curr_nets[3]
+            Dcs_curr, Dgta_curr = curr_nets[4], curr_nets[5]
         else:
-            Dst_curr, Gst_curr = init_models(opt)
-            Dts_curr, Gts_curr = init_models(opt)
-
-        if opt.last_scale and semseg_cs==None:  # Last scale, add semseg network:
+            Dst_curr, Gst_curr, Dcs_curr = init_models(opt)
+            Dts_curr, Gts_curr, Dgta_curr = init_models(opt)
             semseg_cs, _ = CreateSemsegModel(opt)
 
         if len(opt.gpus) > 1:
@@ -70,30 +78,35 @@ def train(opt):
             # todo: for now, decided to use GroupNorm instead of BN, so not using sync BN!
             Dst_curr, Gst_curr = nn.DataParallel(Dst_curr), nn.DataParallel(Gst_curr)
             Dts_curr, Gts_curr = nn.DataParallel(Dts_curr), nn.DataParallel(Gts_curr)
+            Dcs_curr, Dgta_curr = nn.DataParallel(Dcs_curr), nn.DataParallel(Dgta_curr)
             if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
                 semseg_cs = nn.DataParallel(semseg_cs)
 
-        print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
+        print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr), print(Dcs_curr), print(Dgta_curr)
         if opt.last_scale:  # Last scale, print semseg network:
             print(semseg_cs)
-        scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
+        scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Dcs_curr, Dgta_curr, Gst, Gts, Dst, Dts, Dcs, Dgta,
                                         opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch,
                                         semseg_cs=semseg_cs)
         for net in scale_nets:
             net = reset_grads(net, False)
             net.eval()
-        Dst_curr, Gst_curr, Dts_curr, Gts_curr = scale_nets
+        Dst_curr, Gst_curr, Dts_curr, Gts_curr, Dcs, Dgta = scale_nets
 
         Gst.append(Gst_curr)
         Gts.append(Gts_curr)
         Dst.append(Dst_curr)
         Dts.append(Dts_curr)
+        Dcs.append(Dcs_curr)
+        Dgta.append(Dgta_curr)
 
         if not opt.debug_run:
             torch.save(Gst, '%s/Gst.pth' % (opt.out_folder))
             torch.save(Gts, '%s/Gts.pth' % (opt.out_folder))
             torch.save(Dst, '%s/Dst.pth' % (opt.out_folder))
             torch.save(Dts, '%s/Dts.pth' % (opt.out_folder))
+            torch.save(Dcs, '%s/Dcs.pth' % (opt.out_folder))
+            torch.save(Dgta, '%s/Dgta.pth' % (opt.out_folder))
 
         opt.prev_base_channels = opt.base_channels
         resume_first_iteration = False
@@ -103,7 +116,8 @@ def train(opt):
     return
 
 
-def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst: list, Dts: list,
+def train_single_scale(netDst, netGst, netDts, netGts, netDcs, netDgta,
+                       Gst: list, Gts: list, Dst: list, Dts: list, Dcs: list, Dgta: list,
                        opt, resume=False, epoch_num_to_resume=1, semseg_cs=None):
     gst_params = []
     for net in Gst:
@@ -119,14 +133,18 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     optimizerGst = optim.Adam(gst_params, lr=opt.lr_g, betas=(opt.beta1, 0.999))
     optimizerDts = optim.Adam(netDts.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
     optimizerGts = optim.Adam(gts_params, lr=opt.lr_g, betas=(opt.beta1, 0.999))
+    optimizerDcs = optim.Adam(netDcs.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
+    optimizerDgta = optim.Adam(netDgta.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
     if opt.last_scale:
         optimizerSemsegCS = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
                                     weight_decay=opt.weight_decay)
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
         semseg_gta = torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
+        optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
+                                      weight_decay=opt.weight_decay)
     else:
-        optimizerSemsegCS, optimizerSemsegGen, semseg_gta = None, None, None
+        optimizerSemsegCS, optimizerSemsegGen, semseg_gta, optimizerSemsegGTA = None, None, None, None
 
     batch_size = opt.source_loaders[opt.curr_scale].batch_size
     opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
@@ -163,6 +181,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             netGst.train()
             netDts.train()
             netGts.train()
+            netDcs.train()
+            netDgta.train()
             for scale_Gst, scale_Gts in zip(Gst, Gts):
                 scale_Gst.train()
                 scale_Gts.train()
@@ -218,10 +238,10 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             ###########################
 
             # Extract features from source and target images:
-            content_features_source, style_features_source = opt.style_transfer_loss.extract_features(source_scales[-1])
-            content_features_target, style_features_target = opt.style_transfer_loss.extract_features(target_scales[-1])
-            content_features_source, style_features_source = [c.detach() for c in content_features_source], [s.detach() for s in style_features_source]
-            content_features_target, style_features_target = [c.detach() for c in content_features_target], [s.detach() for s in style_features_target]
+            # content_features_source, style_features_source = opt.style_transfer_loss.extract_features(source_scales[-1])
+            # content_features_target, style_features_target = opt.style_transfer_loss.extract_features(target_scales[-1])
+            # content_features_source, style_features_source = [c.detach() for c in content_features_source], [s.detach() for s in style_features_source]
+            # content_features_target, style_features_target = [c.detach() for c in content_features_target], [s.detach() for s in style_features_target]
             for j in range(opt.Gsteps):
                 # train generator networks between domains (S->T, T->S)
                 optimizerGst.zero_grad()
@@ -231,16 +251,16 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                 # S -> T:
                 generator_losses = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt,
-                                                      source_content_features=content_features_source,
-                                                      target_style_features=style_features_target,
+                                                      # source_content_features=content_features_source,
+                                                      # target_style_features=style_features_target,
                                                       source_segmap=source_segmap)
                 for k,v in generator_losses.items():
                     opt.tb.add_scalar('Scale%d/ST/Generator/%s' % (opt.curr_scale,k), v, generator_steps)
 
                 # T -> S:
                 generator_losses = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt,
-                                                      source_content_features=content_features_target,
-                                                      target_style_features=style_features_source,
+                                                      # source_content_features=content_features_target,
+                                                      # target_style_features=style_features_source,
                                                       source_segmap=None,
                                                       retain_graph=False)
                 for k,v in generator_losses.items():
@@ -265,9 +285,24 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             # (3) Update semantic segmentation network: minimize CE Loss on converted images (Use GT of source domain):
             ###########################
             if opt.last_scale:
+                optimizerDcs.zero_grad()
+                optimizerDgta.zero_grad()       
+                # S -> T:
+                discriminator_losses = adversarial_discriminative_train(netDcs, netGst, Gst, target_scales[opt.curr_scale], source_scales, opt, semseg=semseg_cs)
+                for k,v in discriminator_losses.items():
+                    opt.tb.add_scalar('Scale%d/SemsegCS/Discriminator/%s' % (opt.curr_scale, k), v, semseg_steps)
+                # T -> S:
+                discriminator_losses = adversarial_discriminative_train(netDgta, netGts, Gts, source_scales[opt.curr_scale], target_scales, opt, semseg=semseg_gta)
+                for k,v in discriminator_losses.items():
+                    opt.tb.add_scalar('Scale%d/SemsegGTA/Discriminator/%s' % (opt.curr_scale, k), v, semseg_steps)
+                optimizerDcs.step()
+                optimizerDgta.step()
+
                 optimizerSemsegCS.zero_grad()
+                optimizerSemsegGTA.zero_grad()
                 if not opt.warmup:
                     optimizerGst.zero_grad()
+                    optimizerGts.zero_grad()
 
                 # Train semseg on GTA5 image converted to CS, using GTA5 labels:
                 prev = concat_pyramid(Gst, source_scales, opt)
@@ -277,17 +312,23 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 semseg_labels = semseg_softs.argmax(1)
                 semseg_loss.backward()
                 opt.tb.add_scalar('Semseg/SemsegLoss', semseg_loss.item(), semseg_steps)
-                # semseg_total_loss = semseg_loss_syn.item()
-                # Train semseg on trusted labels from CS:
-                # if opt.use_distillation and not opt.warmup:
-                #     trusted_labels_target = strongly_trusted_labels(target_softs, opt.ignore_threshold, IGNORE_LABEL)
-                #     semseg_softs_real, semseg_labels_real, semseg_loss_real = real_semantic_segmentation_loss(target_scales[-1], trusted_labels_target, semseg_cs, opt)
-                #     opt.tb.add_scalar('Semseg/SemsegLossDistillation', semseg_loss_real.item(), semseg_steps)
-                #     semseg_total_loss += semseg_loss_real.item()
-                # opt.tb.add_scalar('Semseg/SemsegLoss', semseg_total_loss, semseg_steps)
+
+
+                # S -> T:
+                generator_losses = adversarial_generative_train(netGst, netDcs, Gst, source_scales, opt, semseg_net=semseg_cs)
+                for k,v in generator_losses.items():
+                    opt.tb.add_scalar('Scale%d/SemsegCS/Generator/%s' % (opt.curr_scale,k), v, semseg_steps)
+                # T -> S:
+                generator_losses = adversarial_generative_train(netGts, netDgta, Gts, target_scales, opt, semseg_net=semseg_gta)
+                for k,v in generator_losses.items():
+                    opt.tb.add_scalar('Scale%d/SemsegGTA/Generator/%s' % (opt.curr_scale,k), v, semseg_steps)
+
                 optimizerSemsegCS.step()
+                optimizerSemsegGTA.step()
                 if not opt.warmup:
                     optimizerGst.step()
+                    optimizerGts.step()
+                
                 semseg_steps += 1
 
             if int(steps / opt.print_rate) >= print_int or steps == 0:
@@ -339,7 +380,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             # Save network checkpoint every opt.save_checkpoint_rate steps:
             if steps > checkpoint_int * opt.save_checkpoint_rate:
                 print('scale %d: saving networks after %d steps...' % (opt.curr_scale, steps))
-                save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
+                save_networks(opt.outf, netDst, netGst, netDts, netGts, netDcs, netDgta, Gst, Gts, Dst, Dts, Dcs, Dgta, opt, semseg_cs)
                 checkpoint_int += 1
 
             steps += np.minimum(opt.Gsteps, opt.Dsteps)
@@ -352,20 +393,23 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             export_epoch_accuracy(opt, iou, miou, cm, epoch_num)
             if miou > opt.best_miou:
                 opt.best_miou = miou
-                save_networks(os.path.join(opt.checkpoints_dir, '%.2f_mIoU_model' % (miou)), netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
+                save_networks(os.path.join(opt.checkpoints_dir, '%.2f_mIoU_model' % (miou)),
+                              netDst, netGst, netDts, netGts, netDcs, netDgta,
+                              Gst, Gts, Dst, Dts, Dcs, Dgta, opt, semseg_cs)
             # Static Focal Loss: set weight vector for next epoch
             # Only after training has passed 40% of the epochs in the last scale.
             if opt.use_focal_static_loss and epoch_num >= int(opt.epochs_per_scale*0.4):
                 semseg_cs.ce_loss.weight = (1-miou)**2
         epoch_num += 1
 
-    save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)
-    return (netDst, netGst, netDts, netGts) if len(opt.gpus) == 1 else (netDst.module, netGst.module, netDts.module, netGts.module)
+    save_networks(opt.outf, netDst, netGst, netDts, netGts, netDcs, netDgta, Gst, Gts, Dst, Dts, Dcs, Dgta, opt, semseg_cs)
+    return (netDst, netGst, netDts, netGts, netDcs, netDgta) if len(opt.gpus) == 1 else (netDst.module, netGst.module, netDts.module, netGts.module, netDcs.module, netDgta.module)
 
 
-def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, opt, real_segmap=None):
+def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, opt, semseg=None, real_segmap=None):
     losses = {}
     # train with real image
+    real_images = real_images if semseg==None else semseg(real_images).detach()
     errD_real = -1 * netD(real_images).mean()
     losses['RealImagesLoss'] = errD_real.item()
     errD_real *=  opt.lambda_adversarial
@@ -374,9 +418,13 @@ def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, o
     # train with fake
     # fake_images = generate_image(netG, from_scales[opt.curr_scale], Gs, from_scales, real_segmap, opt, grad_on_generator=False)
     with torch.no_grad():
-        curr = from_scales[opt.curr_scale]
-        prev = concat_pyramid(Gs, from_scales, opt)
-        fake_images = netG(curr, prev, real_segmap)
+        if semseg==None:
+            curr = from_scales[opt.curr_scale]
+            prev = concat_pyramid(Gs, from_scales, opt)
+            fake_images = netG(curr, prev, real_segmap)
+        else:
+            fake_images = semseg(from_scales[opt.curr_scale])
+
     errD_fake = netD(fake_images.detach()).mean()
     losses['FakeImagesLoss'] = errD_fake.item()
     errD_fake *= opt.lambda_adversarial
@@ -390,20 +438,26 @@ def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, o
     losses['LossAdversarial'] = losses['FakeImagesLoss'] + losses['RealImagesLoss'] + losses['LossGP']
     return losses
 
-def adversarial_generative_train(netG, netD, Gs, source_scales, opt, source_content_features, target_style_features, source_segmap=None, retain_graph=True):
+def adversarial_generative_train(netG, netD, Gs, source_scales, opt,
+                                 semseg_net=None,
+                                 source_content_features=None, target_style_features=None, source_segmap=None, retain_graph=True):
     losses = {}
     # train with fake
     fake_target_image = generate_image(netG, source_scales[opt.curr_scale], Gs, source_scales, source_segmap, opt)
-    fake_content_features, fake_style_features = opt.style_transfer_loss.extract_features(fake_target_image)
+    # fake_content_features, fake_style_features = opt.style_transfer_loss.extract_features(fake_target_image)
+    if semseg_net != None:
+        fake_target_image = semseg_net(fake_target_image)
     adv_loss = -1 * netD(fake_target_image).mean()
     losses['LossAdversarial'] = adv_loss.item()
     adv_loss *=  opt.lambda_adversarial
     adv_loss.backward(retain_graph=True)
-    total_style_loss, style_losses = opt.style_transfer_loss(fake_target_image, fake_content_features, fake_style_features,
-                                      source_content_features, target_style_features)
-    total_style_loss *=  opt.lambda_style
-    total_style_loss.backward(retain_graph=retain_graph)
-    losses.update(style_losses)
+
+    # if source_content_features != None and target_style_features != None:
+    #     total_style_loss, style_losses = opt.style_transfer_loss(fake_target_image, fake_content_features, fake_style_features,
+    #                                       source_content_features, target_style_features)
+    #     total_style_loss *=  opt.lambda_style
+    #     total_style_loss.backward(retain_graph=retain_graph)
+    #     losses.update(style_losses)
     return losses
 
 
@@ -544,7 +598,11 @@ def init_models(opt):
         netD = models.WDiscriminator(opt).to(opt.device)
     netD.apply(models.weights_init)
 
-    return netD, netG
+    # discriminator for semseg initialization:
+    netD_SS = models.WDiscriminator(opt, is_semseg_discriminator=True).to(opt.device)
+    netD_SS.apply(models.weights_init)
+
+    return netD, netG, netD_SS
 
 
 def load_trained_networks(opt):
@@ -557,11 +615,23 @@ def load_trained_networks(opt):
         m2.eval().to(opt.device)
         m3.eval().to(opt.device)
         m4.eval().to(opt.device)
+
     if os.path.isfile(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth')):
         semseg_cs = torch.load(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth'))
     else:
         semseg_cs = None
-    return Gst, Gts, Dst, Dts, semseg_cs
+
+    if os.path.isfile(os.path.join(opt.continue_train_from_path, 'Dcs.pth')):
+        Dcs = torch.load(os.path.join(opt.continue_train_from_path, 'Dcs.pth'))
+    else:
+        Dcs = None
+
+    if os.path.isfile(os.path.join(opt.continue_train_from_path, 'Dgta.pth')):
+        Dgta = torch.load(os.path.join(opt.continue_train_from_path, 'Dgta.pth'))
+    else:
+        Dgta = None
+
+    return Gst, Gts, Dst, Dts, semseg_cs, Dcs, Dgta
 
 
 def export_epoch_accuracy(opt, iou, miou, cm, epoch):

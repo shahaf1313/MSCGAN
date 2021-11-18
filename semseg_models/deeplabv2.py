@@ -6,6 +6,43 @@ from core.sync_batchnorm.batchnorm import SynchronizedBatchNorm2d
 from core.constants import IGNORE_LABEL
 affine_par = True
 
+def conv3x3(in_planes, out_planes, stride=1):
+    "3x3 convolution with padding"
+    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+                     padding=1, bias=False)
+
+
+class BasicBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None):
+        super(BasicBlock, self).__init__()
+        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.bn1 = nn.BatchNorm2d(planes, affine=affine_par)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = conv3x3(planes, planes)
+        self.bn2 = nn.BatchNorm2d(planes, affine=affine_par)
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        residual = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out += residual
+        out = self.relu(out)
+
+        return out
+
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -294,14 +331,22 @@ def freeze_bn_func(m):
         m.weight.requires_grad = False
         m.bias.requires_grad = False
 
-def DeeplabV2(BatchNorm, num_classes=21, freeze_bn=False, restore_from=None, initialization=None, bn_clr=False):
-    model = ResNet101(Bottleneck, [3, 4, 23, 3], num_classes, BatchNorm, bn_clr=bn_clr)
+def DeeplabV2(backbone, BatchNorm, num_classes=21, freeze_bn=False, bn_clr=False):
+    if backbone == 'resnet101':
+        model = ResNet101(Bottleneck, [3, 4, 23, 3], num_classes, BatchNorm, bn_clr=bn_clr)
+        pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
+    elif backbone == 'resnet50':
+        model = ResNet101(Bottleneck, [3, 4, 6, 3], num_classes, BatchNorm, bn_clr=bn_clr)
+        pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
+    elif backbone == 'resnet18':
+        model = ResNet101(BasicBlock, [2, 2, 2, 2], num_classes, BatchNorm, bn_clr=bn_clr)
+        pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
+    else:
+        raise NotImplemented()
+
     if freeze_bn:
         model.apply(freeze_bn_func)
-    if initialization is None:
-        pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
-    else:
-        pretrain_dict = torch.load(initialization)['state_dict']
+
     model_dict = {}
     state_dict = model.state_dict()
     for k, v in pretrain_dict.items():
@@ -309,10 +354,5 @@ def DeeplabV2(BatchNorm, num_classes=21, freeze_bn=False, restore_from=None, ini
             model_dict[k] = v
     state_dict.update(model_dict)
     model.load_state_dict(state_dict)
-
-    if restore_from is not None:
-        checkpoint = torch.load(restore_from)
-        model.load_state_dict(checkpoint['ResNet101']["model_state"])
-        #model.load_state_dict(checkpoint['ema'])
 
     return model
