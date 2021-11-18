@@ -115,6 +115,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
         semseg_gta = torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
+        optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg/5, momentum=opt.momentum,
+                                       weight_decay=opt.weight_decay)
     else:
         optimizerSemsegCS, optimizerSemsegGen, semseg_gta = None, None, None
 
@@ -215,6 +217,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 optimizerGts.zero_grad()
                 if opt.last_scale and not opt.warmup:
                     optimizerSemsegGen.zero_grad()
+                    optimizerSemsegGTA.zero_grad()
 
                 # S -> T:
                 generator_losses = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt,
@@ -245,6 +248,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 optimizerGts.step()
                 if opt.last_scale and not opt.warmup:
                     optimizerSemsegGen.step()
+                    optimizerSemsegGTA.step()
 
                 generator_steps += 1
 
@@ -315,11 +319,11 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                             softs_max_target = torch.nn.functional.softmax(cyc_images['t_softs'], dim=1)
                             hist_values_target = softs_max_target.max(dim=1)[0][0]
                             t_label = colorize_mask(cyc_images['t_softs'].argmax(1)[0])
-                            tisit_label = colorize_mask(cyc_images['tisit_softs'].argmax(1)[0])
+                            tis_label = colorize_mask(cyc_images['tis_softs'].argmax(1)[0])
                             opt.tb.add_image('Scale%d/target_values' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, dataformats='HW')
                             opt.tb.add_histogram('Scale%d/target_histogram' % opt.curr_scale, hist_values_target, save_pics_int * opt.save_pics_rate, bins='auto')
                             opt.tb.add_image('Scale%d/LabelsCyclic/target_label' % opt.curr_scale, t_label, save_pics_int * opt.save_pics_rate)
-                            opt.tb.add_image('Scale%d/LabelsCyclic/tisit_label' % opt.curr_scale, tisit_label, save_pics_int * opt.save_pics_rate)
+                            opt.tb.add_image('Scale%d/LabelsCyclic/tis_label' % opt.curr_scale, tis_label, save_pics_int * opt.save_pics_rate)
 
                 save_pics_int += 1
 
@@ -449,11 +453,12 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
 
     # Target Label Cyclic Loss:
     if opt.use_target_label_loss and opt.last_scale and not opt.warmup:
-        target_softs = semseg_cs(target_batch)
+        with torch.no_grad():
+            tis_softs = semseg_gta(tis_image)
+            tis_label = tis_softs.argmax(1).detach()
+        target_softs, loss_labels_target = semseg_cs(target_batch, tis_label)
         images['t_softs'] = target_softs
-        tisit_softs = semseg_cs(tisit_image)
-        images['tisit_softs'] = tisit_softs
-        loss_labels_target = criterion_target_labels(target_softs, tisit_softs)
+        images['tis_softs'] = tis_softs
         losses['TargetLabelLoss'] = loss_labels_target.item()
         loss_labels_target *= opt.lambda_labels
         loss_labels_target.backward()
@@ -546,6 +551,8 @@ def load_trained_networks(opt):
         m4.eval().to(opt.device)
     if os.path.isfile(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth')):
         semseg_cs = torch.load(os.path.join(opt.continue_train_from_path, 'semseg_cs.pth'))
+        if not hasattr(semseg_cs, 'ce_loss'):
+            semseg_cs.ce_loss = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
     else:
         semseg_cs = None
     return Gst, Gts, Dst, Dts, semseg_cs
