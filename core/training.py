@@ -141,8 +141,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, netDcs, netDgta,
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
         semseg_gta = torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
-        optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
-                                      weight_decay=opt.weight_decay)
+        # optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
+        #                               weight_decay=opt.weight_decay)
     else:
         optimizerSemsegCS, optimizerSemsegGen, semseg_gta, optimizerSemsegGTA = None, None, None, None
 
@@ -299,7 +299,6 @@ def train_single_scale(netDst, netGst, netDts, netGts, netDcs, netDgta,
                 optimizerDgta.step()
 
                 optimizerSemsegCS.zero_grad()
-                optimizerSemsegGTA.zero_grad()
                 if not opt.warmup:
                     optimizerGst.zero_grad()
                     optimizerGts.zero_grad()
@@ -324,7 +323,6 @@ def train_single_scale(netDst, netGst, netDts, netGts, netDcs, netDgta,
                     opt.tb.add_scalar('Scale%d/SemsegGTA/Generator/%s' % (opt.curr_scale,k), v, semseg_steps)
 
                 optimizerSemsegCS.step()
-                optimizerSemsegGTA.step()
                 if not opt.warmup:
                     optimizerGst.step()
                     optimizerGts.step()

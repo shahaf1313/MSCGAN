@@ -114,8 +114,8 @@ def save_networks(path, netDst, netGst, netDts, netGts, netDcs, netDgta,
             torch.save(Gst + [netGst], '%s/Gst.pth' % (path))
             torch.save(Dts + [netDts], '%s/Dts.pth' % (path))
             torch.save(Gts + [netGts], '%s/Gts.pth' % (path))
-            torch.save(Dcs + netDcs, '%s/Dcs.pth' % (path))
-            torch.save(Dgta + netDgta, '%s/Dgta.pth' % (path))
+            torch.save(Dcs + [netDcs], '%s/Dcs.pth' % (path))
+            torch.save(Dgta + [netDgta], '%s/Dgta.pth' % (path))
             if semseg_cs != None:
                 torch.save(semseg_cs, '%s/semseg_cs.pth' % (path))
 

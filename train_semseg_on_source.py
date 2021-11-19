@@ -1,7 +1,6 @@
 def main(opt):
-    opt.curr_scale=0
-    opt.num_scales=0
     opt.num_steps=1e6
+    opt.curr_scale = opt.semseg_train_scale
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
@@ -29,8 +28,10 @@ def main(opt):
                 break
 
             semseg_optimizer.zero_grad()
-            source_image = source_scales[-1].to(opt.device)
-            source_label = source_label.to(opt.device)
+            source_image = source_scales[opt.curr_scale].to(opt.device)
+            source_label = torch.nn.functional.interpolate(source_label.to(opt.device).unsqueeze(1),
+                                                           scale_factor=opt.scale_factor**(opt.num_scales-opt.curr_scale),
+                                                           mode='nearest').squeeze(1)
             output_softs, semseg_loss = semseg_net(source_image, source_label)
             semseg_loss = semseg_loss.mean()
             output_label = output_softs.argmax(1)
@@ -81,8 +82,10 @@ def calculte_validation_accuracy(semseg_net, val_loader, opt, epoch_num):
     rand_batchs = np.floor(rand_samp_inds/opt.batch_size).astype(np.int)
     cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
     for batch_num, (images, labels) in enumerate(val_loader):
-        images = images[-1].to(opt.device)
-        labels = labels.to(opt.device)
+        images = images[opt.curr_scale].to(opt.device)
+        labels = torch.nn.functional.interpolate(labels.to(opt.device).unsqueeze(1),
+                                        scale_factor=opt.scale_factor**(opt.num_scales-opt.curr_scale),
+                                        mode='nearest').squeeze(1)
         with torch.no_grad():
             pred_softs = semseg_net(images)
             pred_labels = torch.argmax(pred_softs, dim=1)

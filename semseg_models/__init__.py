@@ -27,9 +27,7 @@ def CreateSemsegModel(args):
         optimizer.zero_grad()
 
     if args.model == 'DeepLabV2':
-        bb_dict = { 0: 'resnet18',
-                    1: 'resnet50',
-                    2: 'resnet101'}
+        bb_dict = {0: 'resnet18', 1: 'resnet50', 2: 'resnet101'}
         model = DeeplabV2(backbone=bb_dict[args.curr_scale], BatchNorm=nn.BatchNorm2d, num_classes=NUM_CLASSES)
         optimizer = optim.SGD(model.optim_parameters(args),
                               lr=args.lr_semseg, momentum=args.momentum, weight_decay=args.weight_decay)
