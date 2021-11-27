@@ -1,6 +1,8 @@
 def main(opt):
+    best_miou = 0
     opt.num_steps=1e6
     opt.curr_scale = opt.semseg_train_scale
+    opt.num_epochs_to_adjust = 100
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
@@ -58,13 +60,17 @@ def main(opt):
 
             steps += 1
         # Update LR:
-        # semseg_scheduler.step()
+        semseg_net.module.adjust_learning_rate(opt, semseg_optimizer, epoch_num)
         #Validation:
         print('train semseg: starting validation after epoch %d.' % epoch_num)
-        iou_bn, miou_bn, cm_bn = calculte_validation_accuracy(semseg_net, source_val_loader, opt, epoch_num)
-        save_epoch_accuracy(opt.tb, 'Validtaion', iou_bn, miou_bn, epoch_num)
-        if epoch_num > 15:
+        iou, miou, cm = calculte_validation_accuracy(semseg_net, source_val_loader, opt, epoch_num)
+        save_epoch_accuracy(opt.tb, 'Validtaion', iou, miou, epoch_num)
+        if miou > best_miou and epoch_num > 0:
             torch.save(semseg_net.module, '%s/semseg_trained_on_gta.pth' % (opt.out_folder))
+            with open('%s/miou_results.txt'%(opt.out_folder), 'w') as f:
+                f.write('best iou: ' + str(iou) + '\n')
+                f.write('best miou: ' + str(miou) + '\n')
+
         epoch_num += 1
 
     opt.tb.close()
@@ -94,9 +100,9 @@ def calculte_validation_accuracy(semseg_net, val_loader, opt, epoch_num):
                 t        = denorm(images[0])
                 t_lbl    = colorize_mask(labels[0])
                 pred_lbl = colorize_mask(pred_labels[0])
-                opt.tb.add_image('Validtaion/Epoch%d/target' % (epoch_num), t, batch_num)
-                opt.tb.add_image('Validtaion/Epoch%d/target_label' % (epoch_num), t_lbl, batch_num)
-                opt.tb.add_image('Validtaion/Epoch%d/prediction_label' % (epoch_num), pred_lbl, batch_num)
+                opt.tb.add_image('Validtaion/target', t, epoch_num)
+                opt.tb.add_image('Validtaion/target_label', t_lbl, epoch_num)
+                opt.tb.add_image('Validtaion/prediction_label', pred_lbl, epoch_num)
     iou, miou = compute_iou_torch(cm)
     return iou, miou, cm
 

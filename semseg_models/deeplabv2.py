@@ -385,8 +385,8 @@ class ResNet(nn.Module):
         return [{'params': self.get_1x_lr_params(), 'lr': args.lr_semseg},
                 {'params': self.get_10x_lr_params(), 'lr': 10 * args.lr_semseg}]
 
-    def adjust_learning_rate(self, args, optimizer, i):
-        lr = args.lr_semseg * ((1 - float(i) / args.num_steps) ** (args.power))
+    def adjust_learning_rate(self, args, optimizer, epoch_num):
+        lr = args.lr_semseg * ((1 - float(epoch_num) / args.num_epochs_to_adjust) ** 2)
         optimizer.param_groups[0]['lr'] = lr
         if len(optimizer.param_groups) > 1:
             optimizer.param_groups[1]['lr'] = lr * 10
@@ -555,16 +555,16 @@ def freeze_bn_func(m):
         m.bias.requires_grad = False
 
 def DeeplabV2(backbone, BatchNorm, num_classes=21, freeze_bn=False):
-    print('Architecture of backbone: ' + backbone)
-    if backbone == 'resnet101':
+    # print('Architecture of backbone: ' + backbone)
+    if backbone == 'resnet101' or backbone == 'resnet50' or backbone == 'resnet18':
         model = ResNet(backbone, Bottleneck, [3, 4, 23, 3], num_classes, BatchNorm)
         pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet101-5d3b4d8f.pth')
-    elif backbone == 'resnet50':
-        model = ResNet(backbone, Bottleneck, [3, 4, 6, 3], num_classes, BatchNorm)
-        pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
-    elif backbone == 'resnet18':
-        model = ResNet(backbone, BasicBlock, [2, 2, 2, 2], num_classes, BatchNorm)
-        pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
+    # elif backbone == 'resnet50':
+    #     model = ResNet(backbone, Bottleneck, [3, 4, 6, 3], num_classes, BatchNorm)
+    #     pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet50-19c8e357.pth')
+    # elif backbone == 'resnet18':
+    #     model = ResNet(backbone, BasicBlock, [2, 2, 2, 2], num_classes, BatchNorm)
+    #     pretrain_dict = model_zoo.load_url('https://download.pytorch.org/models/resnet18-5c106cde.pth')
     else:
         raise NotImplemented()
 
