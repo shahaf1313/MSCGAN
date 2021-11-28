@@ -386,7 +386,7 @@ class ResNet(nn.Module):
                 {'params': self.get_10x_lr_params(), 'lr': 10 * args.lr_semseg}]
 
     def adjust_learning_rate(self, args, optimizer, epoch_num):
-        lr = args.lr_semseg * ((1 - float(epoch_num) / args.num_epochs_to_adjust) ** 2)
+        lr = args.lr_semseg * ((1 - float(epoch_num) / args.num_epochs_to_adjust) ** 0.6)
         optimizer.param_groups[0]['lr'] = lr
         if len(optimizer.param_groups) > 1:
             optimizer.param_groups[1]['lr'] = lr * 10
