@@ -71,7 +71,6 @@ def get_arguments():
 
     # Semseg network parameters:
     parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLabV2, DeepLab and VGG")
-
     parser.add_argument("--num_classes", type=int, required=False, default=19, help="Number of classes in the segmentation task. Default - 19")
     parser.add_argument("--semseg_train_scale", type=int, required=False, default=0, help="Scale number to train on source images (defines the training backbone net).")
     parser.add_argument("--ignore_threshold", type=float, required=False, default=0.5, help="Threshold probability to accept label conditioning of the semseg network.")
@@ -85,7 +84,6 @@ def get_arguments():
     parser.add_argument("--power", type=float, default=0.9, help="Decay parameter to compute the learning rate (only for deeplab).")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum component of the optimiser.")
 
-
     # Miscellaneous parameters:
     parser.add_argument('--train_im2im_pyramid', help='Chooses whether to train semseg pyramid or im2im pyramid (defualt is to train semseg).', default=False, action='store_true')
     parser.add_argument("--tb_logs_dir", type=str, required=False, default='./runs', help="Path to Tensorboard logs dir.")
@@ -96,6 +94,8 @@ def get_arguments():
     parser.add_argument("--print_rate", type=int, required=False, default=100, help="Print progress to screen every x iterations")
     parser.add_argument("--save_checkpoint_rate", type=int, required=False, default=1000, help="Saves progress to checkpoint files every x iterations")
     parser.add_argument("--pics_per_epoch", type=int, required=False, default=10, help="Defines the number of pictures to save each epoch.")
+    parser.add_argument("--trained_msc_model_path", type=str, required=False, default='', help="Trained model path for SIT dataset creation")
+    parser.add_argument("--sit_dataset_path", type=str, required=False, default='', help="Path to save SIT dataset after creation")
 
     return parser
 

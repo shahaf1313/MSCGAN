@@ -6,10 +6,11 @@ import torch
 from core.constants import IMG_RESIZE
 
 class GTA5DataSet(domainAdaptationDataSet):
-    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_image_label_pyramid=False):
+    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_image_label_pyramid=False, get_filename=False):
         super(GTA5DataSet, self).__init__(root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
         self.resize = IMG_RESIZE
         self.get_image_label_pyramid = get_image_label_pyramid
+        self.get_filename = get_filename
     def __len__(self):
         return len(self.img_ids)
 
@@ -43,7 +44,7 @@ class GTA5DataSet(domainAdaptationDataSet):
         elif self.get_image_label_pyramid:
             return scales_pyramid, labels_pyramid
         else:
-            return scales_pyramid
+            return scales_pyramid if not self.get_filename else scales_pyramid, name
 
     def convert_to_class_ids(self, label_image):
         label = np.asarray(label_image, np.float32)

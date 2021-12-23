@@ -2,7 +2,7 @@ def main(opt):
     best_miou = 0
     opt.num_steps=1e6
     opt.curr_scale = opt.semseg_train_scale
-    opt.num_epochs_to_adjust = 200
+    opt.num_epochs_to_adjust = 400
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
