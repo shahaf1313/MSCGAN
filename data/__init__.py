@@ -7,7 +7,7 @@ from data.synthia_dataset import SYNDataSet
 from data.im2im_dataset import Im2imDataset
 
 
-def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label_pyramid=False, get_filename=False):
+def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label_pyramid=False, get_filename=False, drop_last=False):
     if opt.source == 'gta5':
         source_dataset = GTA5DataSet(opt.src_data_dir,
                                      opt.src_data_list,
@@ -28,7 +28,7 @@ def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label
                                         shuffle=True,
                                         num_workers=opt.num_workers,
                                         pin_memory=True,
-                                        drop_last=True)
+                                        drop_last=drop_last)
     return source_dataloader
 
 
