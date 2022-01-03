@@ -285,7 +285,8 @@ def norm_image(im, norm_type='tanh_norm'):
         out = out / out.max()
     else:
         raise NotImplemented()
-    assert torch.max(out) <= 1 and torch.min(out) >= 0
+    # assert torch.max(out) <= 1.1 and torch.min(out) >= -0.1
+    out = torch.clamp(out,0, 1)
     return out
 
 def calculte_cs_validation_accuracy(semseg_net, target_val_loader, epoch_num, tb_path, device):

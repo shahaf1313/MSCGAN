@@ -1,8 +1,7 @@
 def main(opt):
     best_miou = 0
-    opt.num_steps=1e6
     opt.curr_scale = opt.semseg_train_scale
-    opt.num_epochs_to_adjust = 400
+    opt.num_epochs = 400
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label=True)
     opt.epoch_size = len(source_train_loader.dataset)
@@ -18,17 +17,12 @@ def main(opt):
     save_pics_int = 0
     epoch_num = 1
     start = time.time()
-    keep_training = True
 
-    while keep_training:
+    for e in range(1, opt.num_epochs+1):
         print('semeg train: starting epoch %d...' % (epoch_num))
         semseg_net.train()
 
         for batch_num, (source_scales, source_label) in enumerate(source_train_loader):
-            if steps > opt.num_steps:
-                keep_training = False
-                break
-
             semseg_optimizer.zero_grad()
             source_image = source_scales[opt.curr_scale].to(opt.device)
             source_label = torch.nn.functional.interpolate(source_label.to(opt.device).unsqueeze(1),
@@ -45,7 +39,7 @@ def main(opt):
             if int(steps/opt.print_rate) >= print_int or steps == 0:
                 elapsed = time.time() - start
                 print('train semseg:[%d/%d] ; elapsed time = %.2f secs per step' %
-                      (print_int*opt.print_rate, opt.num_steps, elapsed/opt.print_rate))
+                      (print_int*opt.print_rate, int(opt.num_epochs*opt.epoch_size/opt.batch_size), elapsed/opt.print_rate))
                 start = time.time()
                 print_int += 1
 
