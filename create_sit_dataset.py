@@ -24,7 +24,8 @@ def main(opt):
             # output_sit_image = np.round(np.moveaxis(output_sit_image, 0, -1) * 255).astype(np.uint8)
             # im = Image.fromarray(output_sit_image)
             save_image(norm_image(sit_batch[i]),    os.path.join(images_path, filename))
-            save_image(torch.from_numpy(colorize_mask(label[i]))/255.,     os.path.join(labels_path, filename))
+            save_segmentation_map(label[i], os.path.join(labels_path, filename))
+            # save_image(torch.from_numpy(colorize_mask(label[i]))/255.,     os.path.join(labels_path, filename))
     print('Finished Creating SIT Dataset.')
 
 

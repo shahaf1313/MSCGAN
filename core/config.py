@@ -27,6 +27,7 @@ def get_arguments():
     parser.add_argument("--trg_data_list", type=str, default='./dataset/cityscapes_list/', help="Path to folder that contains a file with a list of images from the target dataset. File named set.txt, where set is train/val/test.")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of threads for each worker")
     parser.add_argument("--save_sit_full_scale", default=False, action='store_true', help='Save source in target image in full scale of source image.')
+    parser.add_argument("--crop_images", default=False, action='store_true', help='Crop images before resizing (like in training process)')
 
     # networks parameters:
     parser.add_argument('--batch_size', type=int, default=1)

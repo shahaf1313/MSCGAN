@@ -127,6 +127,13 @@ def colorize_mask(mask):
     new_mask = np.array(new_mask.convert('RGB')).transpose((2, 0, 1))
     return new_mask
 
+def save_segmentation_map(segmap, path):
+    # mask: tensor of the mask
+    # returns: numpy array of the colorized mask
+    new_mask = Image.fromarray(segmap.cpu().numpy().astype(np.uint8)).convert('P')
+    new_mask.putpalette(palette)
+    new_mask.save(path)
+
 def nanmean_torch(x):
     num = torch.where(torch.isnan(x), torch.full_like(x, 0), torch.full_like(x, 1)).sum()
     value = torch.where(torch.isnan(x), torch.full_like(x, 0), x).sum()

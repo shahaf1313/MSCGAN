@@ -53,7 +53,8 @@ def create_sit_dataloader(opt, set='train'):
                                 opt.scale_factor,
                                 opt.num_scales,
                                 opt.curr_scale,
-                                set)
+                                set,
+                                random_crop=opt.crop_images)
 
     sit_dataloader =     DataLoader(_sit_dataset,
                                     batch_size=opt.batch_size,
