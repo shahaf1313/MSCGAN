@@ -38,7 +38,7 @@ if __name__ == "__main__":
     from data.generate_sit_dataset import create_sit_dataloader
     import torch
     from core.config import get_arguments, post_config
-    from core.functions import norm_image, colorize_mask
+    from core.functions import norm_image, colorize_mask, save_segmentation_map
     from core.training import concat_pyramid_eval
     from core.constants import SOURCE_IMAGE_SIZE
     import os
