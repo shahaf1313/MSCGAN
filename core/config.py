@@ -9,7 +9,7 @@ def get_arguments():
     parser = argparse.ArgumentParser()
     # workspace:
     parser.add_argument("--gpus", type=int, nargs='+', help="String that contains available GPUs to use", default=[0])
-    parser.add_argument('--not_cuda', action='store_true', help='disables cuda', default=0)
+    # parser.add_argument('--not_cuda', action='store_true', help='disables cuda', default=0)
 
     # load, input, save configurations:
     parser.add_argument('--manualSeed', default=1337, type=int, help='manual seed')
@@ -26,7 +26,7 @@ def get_arguments():
     parser.add_argument("--src_data_list", type=str, default='./dataset/gta5_list/', help="Path to folder that contains a file with a list of images from the source dataset. File named set.txt, where set is train/val/test.")
     parser.add_argument("--trg_data_dir", type=str, default='/home/shahaf/data/cityscapes', help="Path to the directory containing the target dataset.")
     parser.add_argument("--trg_data_list", type=str, default='./dataset/cityscapes_list/', help="Path to folder that contains a file with a list of images from the target dataset. File named set.txt, where set is train/val/test.")
-    parser.add_argument("--num_workers", type=int, default=16, help="Number of threads for each worker")
+    parser.add_argument("--num_workers", type=int, default=8, help="Number of threads for each worker")
 
     # networks parameters:
     parser.add_argument('--batch_size', type=int, default=1)
@@ -149,7 +149,8 @@ def post_config(opt):
             opt.manualSeed = random.randint(1, 10000)
         print("Random Seed: ", opt.manualSeed)
         import torch
-        opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
+        # opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
+        opt.device = torch.device('cuda')
         # torch.set_deterministic(True)
         # torch.backends.cudnn.deterministic = True
         random.seed(opt.manualSeed)

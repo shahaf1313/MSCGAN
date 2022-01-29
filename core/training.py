@@ -122,7 +122,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
     batch_size = opt.source_loaders[opt.curr_scale].batch_size
     opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
-    opt.style_transfer_loss = StyleTransferLoss(opt)
+    # opt.style_transfer_loss = StyleTransferLoss(opt)
     total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size)
     start = time.time()
     epoch_num = epoch_num_to_resume if resume else 1
