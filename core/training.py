@@ -122,7 +122,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
     batch_size = opt.source_loaders[opt.curr_scale].batch_size
     opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
-    # opt.style_transfer_loss = StyleTransferLoss(opt)
+    opt.style_transfer_loss = StyleTransferLoss(opt)
     total_steps_per_scale = opt.epochs_per_scale * int(opt.epoch_size * np.minimum(opt.Dsteps, opt.Gsteps) / batch_size)
     start = time.time()
     epoch_num = epoch_num_to_resume if resume else 1
@@ -207,6 +207,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             ###########################
 
             # Extract features from source and target images:
+            content_features_source, style_features_source = opt.style_transfer_loss.extract_features(source_scales[-1])
+            content_features_target, style_features_target = opt.style_transfer_loss.extract_features(target_scales[-1])
             # content_features_source, style_features_source = opt.style_transfer_loss.extract_features(source_scales[-1])
             # content_features_target, style_features_target = opt.style_transfer_loss.extract_features(target_scales[-1])
             # content_features_source, style_features_source = [c.detach() for c in content_features_source], [s.detach() for s in style_features_source]
@@ -221,16 +223,16 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                 # S -> T:
                 generator_losses = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt,
-                                                      source_content_features=None,
-                                                      target_style_features=None,
-                                                      source_segmap=source_segmap)
+                                                      source_content_features=content_features_source,
+                                                      target_style_features=style_features_target,
+                                                      source_segmap=None)
                 for k,v in generator_losses.items():
                     opt.tb.add_scalar('Scale%d/ST/Generator/%s' % (opt.curr_scale,k), v, generator_steps)
 
                 # T -> S:
                 generator_losses = adversarial_generative_train(netGts, netDts, Gts, target_scales, opt,
-                                                      source_content_features=None,
-                                                      target_style_features=None,
+                                                      source_content_features=content_features_target,
+                                                      target_style_features=style_features_source,
                                                       source_segmap=None,
                                                       retain_graph=False)
                 for k,v in generator_losses.items():
@@ -385,16 +387,33 @@ def adversarial_generative_train(netG, netD, Gs, source_scales, opt, source_cont
     losses = {}
     # train with fake
     fake_target_image = generate_image(netG, source_scales[opt.curr_scale], Gs, source_scales, source_segmap, opt)
-    # fake_content_features, fake_style_features = opt.style_transfer_loss.extract_features(fake_target_image)
+    # prev = concat_pyramid(Gs, from_scales, opt)
+    # fake = netG(curr, prev, real_segmap)
+    fake_content_features, fake_style_features = opt.style_transfer_loss.extract_features(fake_target_image)
     adv_loss = -1 * netD(fake_target_image).mean()
     losses['LossAdversarial'] = adv_loss.item()
     adv_loss *=  opt.lambda_adversarial
     adv_loss.backward(retain_graph=True)
-    # total_style_loss, style_losses = opt.style_transfer_loss(fake_target_image, fake_content_features, fake_style_features,
-    #                                   source_content_features, target_style_features)
-    # total_style_loss *=  opt.lambda_style
-    # total_style_loss.backward(retain_graph=retain_graph)
-    # losses.update(style_losses)
+    total_style_loss, style_losses = opt.style_transfer_loss(fake_target_image, fake_content_features, fake_style_features,
+                                                             source_content_features, target_style_features)
+    total_style_loss *=  opt.lambda_style
+    total_style_loss.backward(retain_graph=True)
+    losses.update(style_losses)
+    return losses
+    #
+    # losses = {}
+    # # train with fake
+    # fake_target_image = generate_image(netG, source_scales[opt.curr_scale], Gs, source_scales, source_segmap, opt)
+    # # fake_content_features, fake_style_features = opt.style_transfer_loss.extract_features(fake_target_image)
+    # adv_loss = -1 * netD(fake_target_image).mean()
+    # losses['LossAdversarial'] = adv_loss.item()
+    # adv_loss *=  opt.lambda_adversarial
+    # adv_loss.backward(retain_graph=True)
+    # # total_style_loss, style_losses = opt.style_transfer_loss(fake_target_image, fake_content_features, fake_style_features,
+    # #                                   source_content_features, target_style_features)
+    # # total_style_loss *=  opt.lambda_style
+    # # total_style_loss.backward(retain_graph=retain_graph)
+    # # losses.update(style_losses)
     return losses
 
 
