@@ -114,7 +114,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                                     weight_decay=opt.weight_decay)
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
-        semseg_gta = torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
+        semseg_gta = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
         optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg/5, momentum=opt.momentum,
                                        weight_decay=opt.weight_decay)
     else:
