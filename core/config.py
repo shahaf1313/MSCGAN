@@ -84,6 +84,7 @@ def get_arguments():
     parser.add_argument("--entW", type=float, default=0.005, help="weight for entropy")
     parser.add_argument("--power", type=float, default=0.9, help="Decay parameter to compute the learning rate (only for deeplab).")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum component of the optimiser.")
+    parser.add_argument("--semseg_source_scale", type=int, default=0, help="Scale number to train on source segmentation.")
 
 
     # Miscellaneous parameters:
