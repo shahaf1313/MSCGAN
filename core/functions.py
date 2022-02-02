@@ -70,9 +70,9 @@ def np2torch(x, opt):
         x = x[:, :, None, None]
         x = x.transpose(3, 2, 0, 1)
     x = torch.from_numpy(x)
-    # if not (opt.not_cuda):
-    x = move_to_gpu(x)
-    x = x.type(torch.cuda.FloatTensor) #if not (opt.not_cuda) else x.type(torch.FloatTensor)
+    if not (opt.not_cuda):
+        x = move_to_gpu(x)
+    x = x.type(torch.cuda.FloatTensor) if not (opt.not_cuda) else x.type(torch.FloatTensor)
     # x = x.type(torch.FloatTensor)
     x = norm(x)
     return x
@@ -190,11 +190,7 @@ def ImageToNumpy(im):
         im = np.transpose(im, (2, 0, 1))
     return im
 
-def encode_semseg_out(input):
-    max_classes = (input == input.max(dim=1, keepdim=True)[0]) * input
-    return max_classes
-
-def encode_semseg_out_with_ignore_label(input, threshold):
+def encode_semseg_out(input, threshold):
     softmax_input = nn.functional.softmax(input, dim=1)
     non_ignore_classes = (softmax_input == softmax_input.max(dim=1, keepdim=True)[0]) * input
     max_soft_values = softmax_input.max(dim=1)[0]
@@ -211,17 +207,11 @@ def strongly_trusted_labels(input, threshold, ignore_label=IGNORE_LABEL):
     strong_labels[softmax_max_values == 0.] = ignore_label
     return strong_labels
 
-def one_hot_encoder_ignore_class(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
+def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
     z = input.clone()
     z[z==ignore_label] = num_classes
     output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
     return output
-
-def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
-    z = input.clone()
-    z[input == ignore_label] = num_classes
-    output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
-    return output[:,:num_classes,:,:]
 
 class runningScore(object):
     def __init__(self, n_classes):
@@ -272,48 +262,3 @@ class runningScore(object):
     def reset(self):
         self.confusion_matrix = np.zeros((self.n_classes, self.n_classes))
 
-def norm_image(im, norm_type='tanh_norm'):
-    if norm_type == 'tanh_norm':
-        out = (im + 1) / 2
-    elif norm_type == 'general_norm':
-        out = (im - im.min())
-        out = out / out.max()
-    else:
-        raise NotImplemented()
-    assert torch.max(out) <= 1 and torch.min(out) >= 0
-    return out
-
-def calculte_cs_validation_accuracy(semseg_net, target_val_loader, epoch_num, tb_path, device):
-    from torch.utils.tensorboard import SummaryWriter
-    semseg_net.eval()
-    tb = SummaryWriter(tb_path)
-    with torch.no_grad():
-        running_metrics_val = runningScore(NUM_CLASSES)
-        cm = torch.zeros((NUM_CLASSES, NUM_CLASSES)).cuda()
-        for val_batch_num, (target_images, target_labels) in enumerate(target_val_loader):
-            target_images = target_images.to(device)
-            target_labels = target_labels.to(device)
-            with torch.no_grad():
-                pred_softs = semseg_net(target_images)
-                pred_labels = torch.argmax(pred_softs, dim=1)
-                cm += compute_cm_batch_torch(pred_labels, target_labels, IGNORE_LABEL, NUM_CLASSES)
-                running_metrics_val.update(target_labels.cpu().numpy(), pred_labels.cpu().numpy())
-                if val_batch_num == 0:
-                    t = norm_image(target_images[0])
-                    t_lbl = colorize_mask(target_labels[0])
-                    pred_lbl = colorize_mask(pred_labels[0])
-                    tb.add_image('Semseg/Validtaion/target', t, epoch_num)
-                    tb.add_image('Semseg/Validtaion/target_label', t_lbl, epoch_num)
-                    tb.add_image('Semseg/Validtaion/prediction_label', pred_lbl, epoch_num)
-        iou, miou = compute_iou_torch(cm)
-
-        # proda's calc:
-        score, class_iou = running_metrics_val.get_scores()
-        for k, v in score.items():
-            print(k, v)
-
-        for k, v in class_iou.items():
-            print(k, v)
-
-        running_metrics_val.reset()
-    return iou, miou, cm

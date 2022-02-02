@@ -26,29 +26,34 @@ class ConvBlockSpade(nn.Module):
         # Normalization:
         if im_per_gpu >= 16:
             self.norm = nn.BatchNorm2d(in_channel)
-            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=True, label_nc=NUM_CLASSES)
+            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=True, label_nc=NUM_CLASSES+1) #+1 for don't care label
         elif im_per_gpu < 16 and in_channel % groups_num == 0:
             self.norm = nn.GroupNorm(num_groups=groups_num, num_channels=in_channel, affine=True)
-            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=NUM_CLASSES)
+            self.spade = SPADE(ker_size, in_channel, groups_num=groups_num, use_bn=False, label_nc=NUM_CLASSES+1) #+1 for don't care label
         else: #don't normalize only in the head module, where you have only 3 channels..
             self.norm  = None
             self.spade = None
+        # todo: delete after training @ Yann finishes:
+        self.bn = self.norm
         # Activation:
         self.actvn = nn.LeakyReLU(0.2)
         # Convolution:
         self.conv = nn.Conv2d(in_channel, out_channel, kernel_size=ker_size, stride=stride, padding=padd)
 
     def forward(self, x, seg_map=None):
-        if self.norm==None: #Don't use norm layer:
-            z = self.actvn(self.conv(x))
-        elif seg_map==None:
-            z = self.conv(self.actvn(self.norm(x)))
+        # todo: delete after training @ Yann finishes:
+        if hasattr(self, 'norm'):
+            if self.norm==None: #Don't use norm layer:
+                z = self.actvn(self.conv(x))
+            elif seg_map==None:
+                z = self.conv(self.actvn(self.norm(x)))
+            else:
+                z = self.conv(self.actvn(self.spade(x, seg_map)))
         else:
-            # todo: I tried to remove SPADE @ Last scale because I wanted the model to
-            # todo: converge WO it as it did in the pervious scales.
-            # todo: uncomment the following line and delete the one after it:
-            # z = self.conv(self.actvn(self.spade(x, seg_map)))
-            z = self.conv(self.actvn(self.norm(x)))
+            if seg_map==None:
+                z = self.conv(self.actvn(self.bn(x)))
+            else:
+                z = self.conv(self.actvn(self.spade(x, seg_map)))
         return z
 
 class SPADE(nn.Module):

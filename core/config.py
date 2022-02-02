@@ -9,14 +9,14 @@ def get_arguments():
     parser = argparse.ArgumentParser()
     # workspace:
     parser.add_argument("--gpus", type=int, nargs='+', help="String that contains available GPUs to use", default=[0])
-    # parser.add_argument('--not_cuda', action='store_true', help='disables cuda', default=0)
+    parser.add_argument('--not_cuda', action='store_true', help='disables cuda', default=0)
 
     # load, input, save configurations:
     parser.add_argument('--manualSeed', default=1337, type=int, help='manual seed')
     parser.add_argument('--continue_train_from_path', type=str, help='Path to folder that contains all networks and continues to train from there', default='')
     parser.add_argument('--resume_to_epoch', default=1, type=int, help='Resumes training from specified epoch')
     parser.add_argument('--nc_im', type=int, help='image # channels', default=3)
-    parser.add_argument('--no_drop_last', default=True, action='store_false', help='When this flag turns on, last batch is not dropped. Regular behavour: drops last batch in training mode.')
+    parser.add_argument('--out', help='output folder', default='Output')
 
     # Dataset parameters:
     parser.add_argument("--source", type=str, default='gta5', help="source dataset : gta5 or synthia")
@@ -26,13 +26,12 @@ def get_arguments():
     parser.add_argument("--src_data_list", type=str, default='./dataset/gta5_list/', help="Path to folder that contains a file with a list of images from the source dataset. File named set.txt, where set is train/val/test.")
     parser.add_argument("--trg_data_dir", type=str, default='/home/shahaf/data/cityscapes', help="Path to the directory containing the target dataset.")
     parser.add_argument("--trg_data_list", type=str, default='./dataset/cityscapes_list/', help="Path to folder that contains a file with a list of images from the target dataset. File named set.txt, where set is train/val/test.")
-    parser.add_argument("--num_workers", type=int, default=8, help="Number of threads for each worker")
+    parser.add_argument("--num_workers", type=int, default=16, help="Number of threads for each worker")
 
     # networks parameters:
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--batch_size_list', type=int, nargs='+', help="batch size in each one of the scales", default=[0])
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
-    parser.add_argument('--use_target_label_loss', default=False, action='store_true', help='Use target label loss in the training process.')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs before switching to label conditioned generator.')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
     parser.add_argument('--use_fcc', default=False, action='store_true', help='Uses FC and Convolutional discriminator and generator')
@@ -48,9 +47,11 @@ def get_arguments():
     # pyramid parameters:
     parser.add_argument('--scale_factor', type=float, help='pyramid scale factor', default=0.75)  # pow(0.5,1/6))
     parser.add_argument('--use_half_image_size', default=False, action='store_true')
+    parser.add_argument('--min_size', type=int, help='image minimal size at the coarser scale', default=None)
+    parser.add_argument('--max_size', type=int, help='image maximal size at the largest scale', default=None)
     parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=None)
     parser.add_argument('--groups_num', type=int, help='number of groups in Group Norm', default=None)
-    parser.add_argument('--base_channels_list', type=int, nargs='+', help='number of channels in the generator and discriminator.', default=[])
+
 
     # optimization hyper parameters:
     parser.add_argument('--epochs_per_scale', type=int, default=12, help='number of epochs to train per scale')
@@ -58,33 +59,42 @@ def get_arguments():
     parser.add_argument('--lr_g', type=float, default=0.00025, help='learning rate, default=0.00025')
     parser.add_argument('--lr_d', type=float, default=0.00025, help='learning rate, default=0.00025')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam. default=0.9')
-    parser.add_argument('--Gsteps', type=int, help='Generator inner steps', default=1)
-    parser.add_argument('--Dsteps', type=int, help='Discriminator inner steps', default=1)
+    parser.add_argument('--Gsteps', type=int, help='Generator inner steps', default=3)
+    parser.add_argument('--Dsteps', type=int, help='Discriminator inner steps', default=3)
+    parser.add_argument('--identity_loss_calc_rate', type=int, help='rate for identity loss calculation', default=0)
+    parser.add_argument('--cyclic_loss_calc_rate', type=int, help='rate for cyclic loss calculation', default=1)
     parser.add_argument('--lambda_grad', type=float, help='gradient penelty weight', default=0.1)
     parser.add_argument('--lambda_adversarial', type=float, help='adversarial loss weight', default=1)
     parser.add_argument('--lambda_cyclic', type=float, help='cyclic loss weight', default=1)
-    parser.add_argument('--lambda_labels', type=float, help='label loss weight', default=1)
     parser.add_argument('--lambda_style', type=float, help='Style loss weight', default=1)
     parser.add_argument('--content_layers', type=int, nargs='+', help='Layer indices to extract content features', default=[15])
     parser.add_argument('--style_layers', type=int, nargs='+', help='Layer indices to extract style features', default=[3, 8, 15, 22])
-    parser.add_argument('--content_weight', type=float, help='Content loss weight', default=1.0)
-    parser.add_argument('--style_weight', type=float, help='style loss weight', default=30.0)
-    parser.add_argument('--tv_weight', type=float, help='tv loss weight', default=1.0)
+    # parser.add_argument('--content_weight', type=float, help='Content loss weight', default=1.0)
+    # parser.add_argument('--style_weight', type=float, help='style loss weight', default=30.0)
+    # parser.add_argument('--tv_weight', type=float, help='tv loss weight', default=1.0)
+    parser.add_argument('--content_weight', type=float, help='Content loss weight', default=1.0/30)
+    parser.add_argument('--style_weight', type=float, help='style loss weight', default=1.0)
+    parser.add_argument('--tv_weight', type=float, help='tv loss weight', default=1.0/30)
+    parser.add_argument('--base_channels_list', type=int, nargs='+', help='number of channels in the generator and discriminator.', default=[])
 
-    # Semseg network parameters:
-    parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLabV2, DeepLab and VGG")
+
+# Semseg network parameters:
+    parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLab and VGG")
     parser.add_argument("--num_classes", type=int, required=False, default=19, help="Number of classes in the segmentation task. Default - 19")
     parser.add_argument("--ignore_threshold", type=float, required=False, default=0.5, help="Threshold probability to accept label conditioning of the semseg network.")
+    parser.add_argument('--epochs_semseg', type=int, default=12, help='number of epochs to train semseg model')
     parser.add_argument("--multiscale_model_path", type=str, default='', help="path to Generators from source to target domain and vice versa.")
+    parser.add_argument("--semseg_model_path", type=str, default='', help="path to folder that contains classifier and feature extractor weights.")
+    parser.add_argument("--semseg_model_epoch_to_resume", type=int, default=-1, help='Epoch that checkpoint to semseg net saved from')
+    parser.add_argument('--use_semseg_generation_training', default=False, action='store_true', help='Uses label generation training in the semseg network.')
     parser.add_argument('--use_distillation', default=False, action='store_true', help='Uses distillation with trusted labels.')
-    parser.add_argument('--use_focal_static_loss', default=False, action='store_true', help='Uses static focal loss for every epoch after 40% of the training of the last scale.')
+    parser.add_argument('--load_only_gta_weights', default=False, action='store_true', help='Loads only source (GTA5) semeseg weigths.')
     parser.add_argument('--lr_semseg', type=float, default=0.00025, help='learning rate, default=0.00025')
     parser.add_argument("--weight-decay", type=float, default=0.0005, help="Regularisation parameter for L2-loss.")
     parser.add_argument("--ita", type=float, default=2.0, help="ita for robust entropy")
     parser.add_argument("--entW", type=float, default=0.005, help="weight for entropy")
     parser.add_argument("--power", type=float, default=0.9, help="Decay parameter to compute the learning rate (only for deeplab).")
     parser.add_argument("--momentum", type=float, default=0.9, help="Momentum component of the optimiser.")
-    parser.add_argument("--semseg_source_scale", type=int, default=0, help="Scale number to train on source segmentation.")
 
 
     # Miscellaneous parameters:
@@ -95,7 +105,6 @@ def get_arguments():
     parser.add_argument('--debug_stop_epoch', type=int, default=0, help='Epoch number to finish training current scale in debug mode.')
     parser.add_argument("--checkpoints_dir", type=str, required=False, default='./TrainedModels', help="Where to save snapshots of the model.")
     parser.add_argument("--print_rate", type=int, required=False, default=100, help="Print progress to screen every x iterations")
-    parser.add_argument("--save_checkpoint_rate", type=int, required=False, default=1000, help="Saves progress to checkpoint files every x iterations")
     parser.add_argument("--pics_per_epoch", type=int, required=False, default=10, help="Defines the number of pictures to save each epoch.")
 
     return parser
@@ -117,17 +126,12 @@ class Logger(object):
         self.log.flush()
 
 def post_config(opt):
-        args = ''
-        for s in sys.argv:
-            args += s + ' '
-        opt.args = args
         # init fixed parameters
-        opt.pretrained_deeplabv2_on_gta_miou_70 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.7mIoU_on_GTA.pth'
         opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])
-        opt.out_folder = '%s/%s' % (opt.checkpoints_dir, opt.folder_string)
+        opt.out_ = '%s/%s' % (opt.checkpoints_dir, opt.folder_string)
 
         try:
-            os.makedirs(opt.out_folder)
+            os.makedirs(opt.out_)
         except OSError:
             pass
 
@@ -138,20 +142,19 @@ def post_config(opt):
             except OSError:
                 pass
             opt.tb_logs_dir = './debug_runs'
-            opt.out_folder = './debug_runs/TrainedModels/%s' % opt.folder_string
+            opt.out_ = './debug_runs/TrainedModels/%s' % opt.folder_string
 
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(opt.gpus)[1:-1].strip(' ').replace(" ", "")
         opt.images_per_gpu = [int(batch_size / len(opt.gpus)) for batch_size in opt.batch_size_list]
-        opt.logger = Logger(os.path.join(opt.out_folder, 'log.txt'))
+        opt.logger = Logger(os.path.join(opt.out_, 'log.txt'))
         sys.stdout = opt.logger
 
         if opt.manualSeed is None:
             opt.manualSeed = random.randint(1, 10000)
         print("Random Seed: ", opt.manualSeed)
         import torch
-        # opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
-        opt.device = torch.device('cuda')
+        opt.device = torch.device('cpu' if opt.not_cuda else 'cuda')
         # torch.set_deterministic(True)
         # torch.backends.cudnn.deterministic = True
         random.seed(opt.manualSeed)

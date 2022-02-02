@@ -60,11 +60,10 @@ class StyleTransferLoss(nn.Module):
     def extract_features(self, image):
         content_features, style_features = [], []
         x = image
-        with torch.no_grad():
-            for index, layer in enumerate(self.feature_extractor_model):
-                x = layer(x)
-                if index in self.content_layers:
-                    content_features.append(x)
-                if index in self.style_layers:
-                    style_features.append(x)
+        for index, layer in enumerate(self.feature_extractor_model):
+            x = layer(x)
+            if index in self.content_layers:
+                content_features.append(x)
+            if index in self.style_layers:
+                style_features.append(x)
         return content_features, style_features
