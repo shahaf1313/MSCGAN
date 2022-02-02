@@ -140,6 +140,7 @@ def post_config(opt):
             opt.tb_logs_dir = './debug_runs'
             opt.out_folder = './debug_runs/TrainedModels/%s' % opt.folder_string
 
+
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(opt.gpus)[1:-1].strip(' ').replace(" ", "")
         opt.images_per_gpu = [int(batch_size / len(opt.gpus)) for batch_size in opt.batch_size_list]
