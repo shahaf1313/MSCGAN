@@ -276,7 +276,8 @@ class ResNet101(nn.Module):
         assert predict.size(3) == target.size(2), "{0} vs {1} ".format(predict.size(3), target.size(3))
         # todo: Shahaf added
         # target = F.one_hot(target).permute(0,3,1,2)
-        loss = self.ce_loss(predict, target.type(torch.long))
+        loss_fn=nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
+        loss = loss_fn(predict, target.type(torch.long))
         # todo: end
         # original code:
         # n, c, h, w = predict.size()

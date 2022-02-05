@@ -115,8 +115,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
         semseg_gta = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
-        optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg/5, momentum=opt.momentum,
-                                       weight_decay=opt.weight_decay)
+        # optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg/5, momentum=opt.momentum,
+        #                                weight_decay=opt.weight_decay)
     else:
         optimizerSemsegCS, optimizerSemsegGen, semseg_gta = None, None, None
 
@@ -219,7 +219,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 optimizerGts.zero_grad()
                 if opt.last_scale and not opt.warmup:
                     optimizerSemsegGen.zero_grad()
-                    optimizerSemsegGTA.zero_grad()
+                    # optimizerSemsegGTA.zero_grad()
 
                 # S -> T:
                 generator_losses = adversarial_generative_train(netGst, netDst, Gst, source_scales, opt,
@@ -250,7 +250,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 optimizerGts.step()
                 if opt.last_scale and not opt.warmup:
                     optimizerSemsegGen.step()
-                    optimizerSemsegGTA.step()
+                    # optimizerSemsegGTA.step()
 
                 generator_steps += 1
 
@@ -412,9 +412,9 @@ def adversarial_generative_train(netG, netD, Gs, source_scales, opt, source_cont
     # # total_style_loss, style_losses = opt.style_transfer_loss(fake_target_image, fake_content_features, fake_style_features,
     # #                                   source_content_features, target_style_features)
     # # total_style_loss *=  opt.lambda_style
-    # # total_style_loss.backward(retain_graph=retain_graph)
-    # # losses.update(style_losses)
-    return losses
+    # # # total_style_loss.backward(retain_graph=retain_graph)
+    # # # losses.update(style_losses)
+    # return losses
 
 
 def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
