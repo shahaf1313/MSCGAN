@@ -1,61 +1,55 @@
-from core.constants import IGNORE_LABEL
+
 import os.path as osp
 from PIL import Image
 import numpy as np
-from torch.utils import data
+import imageio
+imageio.plugins.freeimage.download()
+from .domainAdaptationDataset import domainAdaptationDataSet
+from core.constants import IMG_RESIZE
 
-class SYNDataSet(data.Dataset):
-
-    def __init__(self, root, list_path, crop_size=(11, 11), resize=(11, 11), ignore_label=IGNORE_LABEL, mean=(128, 128, 128)):
-        self.root = root
-        self.list_path = list_path
-        self.crop_size = crop_size
-        self.resize = resize
-        self.ignore_label = ignore_label
-        self.mean = mean
-        self.img_ids = [i_id.strip()[4:] for i_id in open(list_path)]
-        self.files = []
+class SynthiaDataSet(domainAdaptationDataSet):
+    def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_image_label_pyramid=False, get_filename=False):
+        super(SynthiaDataSet, self).__init__(root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
+        self.resize = IMG_RESIZE
+        self.get_image_label_pyramid = get_image_label_pyramid
+        self.get_filename = get_filename
         self.id_to_trainid = {3: 0, 4: 1, 2: 2, 21: 3, 5: 4, 7: 5,
                               15: 6, 9: 7, 6: 8, 16: 9, 1: 10, 10: 11, 17: 12,
                               8: 13, 18: 14, 19: 15, 20: 16, 12: 17, 11: 18}
+
     def __len__(self):
         return len(self.img_ids)
 
     def __getitem__(self, index):
         name = self.img_ids[index]
         image = Image.open(osp.join(self.root, "RGB/%s" % name)).convert('RGB')
-        label = Image.open(osp.join(self.root, "synthia_mapped_to_cityscapes/%s" % name)) # label from synthia has to be convert to CityS format
-        # resize
         image = image.resize(self.resize, Image.BICUBIC)
-        label = label.resize(self.resize, Image.NEAREST)
-
-        # (left, upper, right, lower)
         left = self.resize[0]-self.crop_size[0]
         upper= self.resize[1]-self.crop_size[1]
-
         left = np.random.randint(0, high=left)
         upper= np.random.randint(0, high=upper)
         right= left + self.crop_size[0]
         lower= upper+ self.crop_size[1]
-
         image = image.crop((left, upper, right, lower))
-        label = label.crop((left, upper, right, lower))
 
-        image = np.asarray(image, np.float32)
-        label = np.asarray(label, np.float32)
-        # re-assign labels to match the format of Cityscapes
-        label_copy = self.ignore_label * np.ones(label.shape, dtype=np.float32)
-        for k, v in self.id_to_trainid.items():
-            label_copy[label == k] = v
+        label, label_copy, labels_pyramid = None, None, None
+        if self.get_image_label or self.get_image_label_pyramid:
+            label_path = osp.join(self.root, "GT/LABELS/%s" % name)
+            label = np.asarray(imageio.imread(label_path, format='PNG-FI'))[:,:,0]
+            label = Image.fromarray(label)
+            label = label.resize(self.resize, Image.NEAREST)
+            label = label.crop((left, upper, right, lower))
+            if self.get_image_label_pyramid:
+                labels_pyramid =  self.GeneratePyramid(label, is_label=True)
+                labels_pyramid = [self.convert_to_class_ids(label_scale) for label_scale in labels_pyramid]
+            else:
+                label = self.convert_to_class_ids(label)
 
-        size = image.shape
-        image = image[:, :, ::-1]  # change to BGR
-        image -= self.mean
-        image = image.transpose((2, 0, 1))
 
-        return image.copy(), label_copy.copy(), np.array(size), name
-
-    def SetEpochSize(self, epoch_size):
-        if (epoch_size > len(self.img_ids)):
-            self.img_ids = self.img_ids * int(np.ceil(float(epoch_size) / len(self.img_ids)))
-        self.img_ids = self.img_ids[:epoch_size]
+        scales_pyramid = self.GeneratePyramid(image)
+        if self.get_image_label:
+            return scales_pyramid, label
+        elif self.get_image_label_pyramid:
+            return scales_pyramid, labels_pyramid
+        else:
+            return scales_pyramid if not self.get_filename else scales_pyramid, self.img_ids[index]

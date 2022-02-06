@@ -3,7 +3,7 @@ from data.gta5_dataset import GTA5DataSet
 import os.path as osp
 import numpy as np
 from data.cityscapes_dataset import cityscapesDataSet
-from data.synthia_dataset import SYNDataSet
+from data.synthia_dataset import SynthiaDataSet
 from data.im2im_dataset import Im2imDataset
 
 
@@ -18,8 +18,16 @@ def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label
                                      get_image_label=get_image_label,
                                      get_image_label_pyramid=get_image_label_pyramid,
                                      get_filename=get_filename)
-    # elif args.source == 'synthia':
-    #     source_dataset = SYNDataSet(args.data_dir, args.data_list, crop_size=image_sizes['cityscapes'], resize=image_sizes['synthia'], mean=IMG_MEAN)
+    elif opt.source == 'synthia':
+        source_dataset = SynthiaDataSet(opt.src_data_dir,
+                                        opt.src_data_list,
+                                        opt.scale_factor,
+                                        opt.num_scales,
+                                        opt.curr_scale,
+                                        set,
+                                        get_image_label=get_image_label,
+                                        get_image_label_pyramid=get_image_label_pyramid,
+                                        get_filename=get_filename)
     else:
         raise ValueError('The source dataset mush be either gta5 or synthia')
 
