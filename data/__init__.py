@@ -40,7 +40,7 @@ def CreateSrcDataLoader(opt, set='train', get_image_label=False, get_image_label
     return source_dataloader
 
 
-def CreateTrgDataLoader(opt, set='train', get_image_label=False, get_scales_pyramid=False):
+def CreateTrgDataLoader(opt, set='train', get_image_label=False, get_scales_pyramid=False, get_pseudo_label=False):
     target_dataset = cityscapesDataSet(opt.trg_data_dir,
                                        opt.trg_data_list,
                                        opt.scale_factor,
@@ -48,7 +48,9 @@ def CreateTrgDataLoader(opt, set='train', get_image_label=False, get_scales_pyra
                                        opt.curr_scale,
                                        set,
                                        get_image_label=get_image_label,
-                                       get_scales_pyramid=get_scales_pyramid)
+                                       get_scales_pyramid=get_scales_pyramid,
+                                       get_pseudo_label=get_pseudo_label,
+                                       pseudo_root=opt.pseudo_root)
 
     if set == 'train':
         target_dataloader = data.DataLoader(target_dataset,

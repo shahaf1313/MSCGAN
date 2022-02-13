@@ -13,6 +13,7 @@ for i in range(zero_pad):
     palette.append(0)
 
 IMG_CROP_SIZE_SEMSEG = (1024, 512)
+IMG_CITYSCAPES_FULL = (2048,1024)
 IMG_CROP_SIZE_IM2IM = (256, 256)
 IMG_RESIZE = (1280, 720)
 BEST_MIOU = 0.
