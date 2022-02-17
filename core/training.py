@@ -114,11 +114,18 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                                     weight_decay=opt.weight_decay)
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
-        semseg_gta = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
+        if opt.source == 'gta':
+            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
+        elif opt.source == 'synthia':
+            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_synthia_miou_60)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_synthia_miou_60)
+            print('loaded synthia''s pretrained semseg.')
+        else:
+            raise NotImplemented()
+        # semseg_pretrained_source = nn.DataParallel(semseg_pretrained_source) if (len(opt.gpus) > 1) else torch.load(semseg_pretrained_source)
         # optimizerSemsegGTA = optim.SGD(semseg_gta.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_gta.optim_parameters(opt), lr=opt.lr_semseg/5, momentum=opt.momentum,
         #                                weight_decay=opt.weight_decay)
     else:
-        optimizerSemsegCS, optimizerSemsegGen, semseg_gta = None, None, None
+        optimizerSemsegCS, optimizerSemsegGen, semseg_pretrained_source = None, None, None
 
     batch_size = opt.source_loaders[opt.curr_scale].batch_size
     opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
@@ -241,7 +248,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 cyc_losses, cyc_images = cycle_consistency_loss(source_scales, netGst, Gst,
                                                                 target_scales, netGts, Gts, opt,
                                                                 source_label, source_segmap,
-                                                                semseg_cs, semseg_gta)
+                                                                semseg_cs, semseg_pretrained_source)
                 for k,v in cyc_losses.items():
                     opt.tb.add_scalar('Scale%d/Cyclic/%s' % (opt.curr_scale,k), v, generator_steps)
 
