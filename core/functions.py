@@ -220,8 +220,9 @@ def one_hot_encoder_ignore_class(input, num_classes=NUM_CLASSES, ignore_label=IG
 def one_hot_encoder(input, num_classes=NUM_CLASSES, ignore_label=IGNORE_LABEL):
     z = input.clone()
     z[input == ignore_label] = num_classes
-    output = nn.functional.one_hot(z.type(torch.int64), num_classes+1).permute(0,3,1,2).type(torch.float32)
-    return output[:,:num_classes,:,:]
+    output = nn.functional.one_hot(z.type(torch.long), num_classes+1).permute(0,3,1,2).type(torch.float32)
+    # return output[:,:num_classes,:,:]
+    return output
 
 class runningScore(object):
     def __init__(self, n_classes):

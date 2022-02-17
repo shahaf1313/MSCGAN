@@ -33,7 +33,7 @@ def get_arguments():
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--batch_size_list', type=int, nargs='+', help="batch size in each one of the scales", default=[0])
     parser.add_argument('--use_unet_generator', default=False, action='store_true', help='Uses U-Net as a generator from large enough scale')
-    parser.add_argument('--use_target_label_loss', default=False, action='store_true', help='Use target label loss in the training process.')
+    parser.add_argument('--disable_cyclic_label_loss', default=False, action='store_true', help='Disable cyclic label loss in the training process.')
     parser.add_argument('--warmup_epochs', type=int, default=10, help='Number of warmup epochs before switching to label conditioned generator.')
     parser.add_argument('--use_downscale_discriminator', default=False, action='store_true', help='Uses Downscaled discriminator')
     parser.add_argument('--use_fcc', default=False, action='store_true', help='Uses FC and Convolutional discriminator and generator')

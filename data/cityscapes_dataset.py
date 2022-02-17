@@ -24,18 +24,19 @@ class cityscapesDataSet(domainAdaptationDataSet):
                               19: 6, 20: 7, 21: 8, 22: 9, 23: 10, 24: 11, 25: 12,
                               26: 13, 27: 14, 28: 15, 31: 16, 32: 17, 33: 18}
         self.get_pseudo_label = get_pseudo_label
-        if self.get_pseudo_label:
-            self.pseudo_root = pseudo_root
-            print('len before removal: ', len(self.img_ids))
-            available_pseudos = sorted(recursive_glob(rootdir=self.pseudo_root, suffix=".png"))
-            available_pseudos = [p.split('/')[-1] for p in available_pseudos]
-            img_ids_to_remove = []
-            for im_id in self.img_ids:
-                if im_id.split('/')[-1] not in available_pseudos:
-                    img_ids_to_remove.append(im_id)
-            for i in range(len(img_ids_to_remove)):
-                self.img_ids.remove(img_ids_to_remove[i])
-            print('len after removal: ', len(self.img_ids))
+        self.pseudo_root = pseudo_root
+        # if self.get_pseudo_label:
+        #     self.pseudo_root = pseudo_root
+        #     print('len before removal: ', len(self.img_ids))
+        #     available_pseudos = sorted(recursive_glob(rootdir=self.pseudo_root, suffix=".png"))
+        #     available_pseudos = [p.split('/')[-1] for p in available_pseudos]
+        #     img_ids_to_remove = []
+        #     for im_id in self.img_ids:
+        #         if im_id.split('/')[-1] not in available_pseudos:
+        #             img_ids_to_remove.append(im_id)
+        #     for i in range(len(img_ids_to_remove)):
+        #         self.img_ids.remove(img_ids_to_remove[i])
+        #     print('len after removal: ', len(self.img_ids))
     def __getitem__(self, index):
         name = self.img_ids[index]
         image = Image.open(osp.join(self.root, "leftImg8bit/%s/%s" % (self.set, name))).convert('RGB')
