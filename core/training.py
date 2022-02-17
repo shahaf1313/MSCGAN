@@ -5,6 +5,7 @@ import torch.utils.data
 from data.labels_info import trainId2label
 from core.constants import NUM_CLASSES, IGNORE_LABEL, BEST_MIOU, IMG_CITYSCAPES_FULL
 from core.sync_batchnorm import convert_model
+from torch.optim import lr_scheduler
 from semseg_models.deeplabv2_proda import DeeplabProda
 from semseg_models import CreateSemsegModel
 from core.style_transfer import StyleTransferLoss
@@ -111,8 +112,12 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     optimizerDts = optim.Adam(netDts.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
     optimizerGts = optim.Adam(netGts.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
     if opt.last_scale:
-        optimizerSemsegCS = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
-                                    weight_decay=opt.weight_decay)
+        schedualerDst = lr_scheduler.MultiStepLR(optimizerDst, milestones=[5, 15, 25], gamma=0.75)
+        schedualerGst = lr_scheduler.MultiStepLR(optimizerGst, milestones=[5, 15, 25], gamma=0.75)
+        schedualerDts = lr_scheduler.MultiStepLR(optimizerDts, milestones=[5, 15, 25], gamma=0.75)
+        schedualerGts = lr_scheduler.MultiStepLR(optimizerGts, milestones=[5, 15, 25], gamma=0.75)
+        # optimizerSemsegCS = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
+        #                             weight_decay=opt.weight_decay)
         # optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
         #                                momentum=opt.momentum, weight_decay=opt.weight_decay)
         # semseg_gta_pretrained = torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
@@ -129,6 +134,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             semseg_cs_pretrained = semseg_cs_pretrained.to(opt.device)
     else:
         semseg_gta_pretrained, semseg_cs_pretrained, optimizerSemsegCS = None, None, None
+        schedualerDst, schedualerGst, schedualerDts, schedualerGts = None, None, None, None
 
     batch_size = opt.source_loaders[opt.curr_scale].batch_size
     opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, batch_size, opt)
@@ -310,6 +316,11 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     opt.tb.add_image('Scale%d/CyclicLabel/tisit_label_pred' % opt.curr_scale, tisit_label, save_pics_int * opt.save_pics_rate)
                     opt.tb.add_image('Scale%d/CyclicLabel/sitis_values' % opt.curr_scale, sitis_values, save_pics_int * opt.save_pics_rate, dataformats='HW')
                     opt.tb.add_image('Scale%d/CyclicLabel/tisit_values' % opt.curr_scale, tisit_values, save_pics_int * opt.save_pics_rate, dataformats='HW')
+                elif opt.disable_cyclic_label_loss and opt.last_scale and not opt.warmup:
+                    s_label = colorize_mask(source_labels[0])
+                    t_label = colorize_mask(target_pseudos[0])
+                    opt.tb.add_image('Scale%d/CyclicLabel/source_label' % opt.curr_scale, s_label, save_pics_int * opt.save_pics_rate)
+                    opt.tb.add_image('Scale%d/CyclicLabel/target_pseudo' % opt.curr_scale, t_label, save_pics_int * opt.save_pics_rate)
 
                 save_pics_int += 1
 
@@ -334,6 +345,11 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         #     # Only after training has passed 40% of the epochs in the last scale.
         #     if opt.use_focal_static_loss and epoch_num >= int(opt.epochs_per_scale*0.4):
         #         semseg_cs.ce_loss.weight = (1-miou)**2
+        if opt.last_scale:
+            schedualerDst.step()
+            schedualerGst.step()
+            schedualerDts.step()
+            schedualerGts.step()
         epoch_num += 1
 
     save_networks(opt.outf, netDst, netGst, netDts, netGts, Gst, Gts, Dst, Dts, opt, semseg_cs)

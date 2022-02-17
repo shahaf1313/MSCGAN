@@ -68,7 +68,8 @@ class SPADE(nn.Module):
         else:
             self.param_free_norm = nn.GroupNorm(num_groups=groups_num, num_channels=norm_nc, affine=False)
         # The dimension of the intermediate embedding space. Yes, hardcoded.
-        nhidden = 128
+        # nhidden = 128
+        nhidden = 48
 
         pw = kernel_size // 2
         self.mlp_shared = nn.Sequential(
