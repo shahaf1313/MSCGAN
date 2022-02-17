@@ -69,7 +69,7 @@ class SPADE(nn.Module):
             self.param_free_norm = nn.GroupNorm(num_groups=groups_num, num_channels=norm_nc, affine=False)
         # The dimension of the intermediate embedding space. Yes, hardcoded.
         # nhidden = 128
-        nhidden = 48
+        nhidden = 32
 
         pw = kernel_size // 2
         self.mlp_shared = nn.Sequential(
@@ -237,6 +237,31 @@ class LabelConditionedGenerator(nn.Module):
             z = torch.cat((curr_scale, prev_scale), 1)
 
         z = self.head(z, seg_map)
+        z = self.body_1(z, seg_map)
+        z = self.body_2(z, seg_map)
+        z = self.body_3(z, seg_map)
+        if self.use_extended_generator:
+            z = self.body_4(z, seg_map)
+            z = self.body_5(z, seg_map)
+        z = self.tail(z, seg_map)
+        z = self.tail_actvn(z)
+        return z
+
+class LabelConditionedDiscriminator(nn.Module):
+    def __init__(self, opt):
+        super(LabelConditionedDiscriminator, self).__init__()
+        self.images_per_gpu = opt.images_per_gpu[opt.curr_scale]
+        self.use_extended_generator = opt.curr_scale >= opt.num_scales - 1
+        self.head =     ConvBlockSpade(opt.nc_im, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.body_1 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.body_2 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.body_3 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.body_4 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.body_5 =   ConvBlockSpade(opt.base_channels, opt.base_channels, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.tail =     ConvBlockSpade(opt.base_channels, 1, opt.ker_size, self.images_per_gpu, opt.groups_num)
+        self.tail_actvn = nn.Tanh()
+    def forward(self, image, seg_map=None):
+        z = self.head(image, seg_map)
         z = self.body_1(z, seg_map)
         z = self.body_2(z, seg_map)
         z = self.body_3(z, seg_map)

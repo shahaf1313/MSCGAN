@@ -359,7 +359,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, opt, real_segmap=None):
     losses = {}
     # train with real image
-    errD_real = -1 * netD(real_images).mean()
+    errD_real = -1 * netD(real_images, real_segmap).mean()
     losses['RealImagesLoss'] = errD_real.item()
     errD_real *=  opt.lambda_adversarial
     errD_real.backward(retain_graph=True)
@@ -370,12 +370,12 @@ def adversarial_discriminative_train(netD, netG, Gs, real_images, from_scales, o
         curr = from_scales[opt.curr_scale]
         prev = concat_pyramid(Gs, from_scales, opt)
         fake_images = netG(curr, prev, real_segmap)
-    errD_fake = netD(fake_images.detach()).mean()
+    errD_fake = netD(fake_images.detach(), real_segmap).mean()
     losses['FakeImagesLoss'] = errD_fake.item()
     errD_fake *= opt.lambda_adversarial
     errD_fake.backward(retain_graph=True)
 
-    gradient_penalty = calc_gradient_penalty(netD, real_images, fake_images, opt.lambda_grad, opt.device)
+    gradient_penalty = calc_gradient_penalty(netD, real_images, fake_images, real_segmap, opt.lambda_grad, opt.device)
     losses['LossGP'] = gradient_penalty.item()
     gradient_penalty *= opt.lambda_adversarial
     gradient_penalty.backward()
@@ -390,7 +390,7 @@ def adversarial_generative_train(netG, netD, Gs, source_scales, opt, source_cont
     # prev = concat_pyramid(Gs, from_scales, opt)
     # fake = netG(curr, prev, real_segmap)
     fake_content_features, fake_style_features = opt.style_transfer_loss.extract_features(fake_target_image)
-    adv_loss = -1 * netD(fake_target_image).mean()
+    adv_loss = -1 * netD(fake_target_image, source_segmap).mean()
     losses['LossAdversarial'] = adv_loss.item()
     adv_loss *=  opt.lambda_adversarial
     adv_loss.backward(retain_graph=True)
@@ -552,7 +552,7 @@ def init_models(opt):
     elif opt.use_fcc or opt.use_fcc_d:
         netD = models.FCCDiscriminator(opt).to(opt.device)
     else:
-        netD = models.WDiscriminator(opt).to(opt.device)
+        netD = models.LabelConditionedDiscriminator(opt).to(opt.device)
     netD.apply(models.weights_init)
 
     return netD, netG

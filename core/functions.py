@@ -41,7 +41,7 @@ def imresize_torch(image_batch, scale, mode):
     else:
         return nn.functional.interpolate(image_batch, size=(new_size[0], new_size[1]), mode=mode)
 
-def calc_gradient_penalty(netD, real_data, fake_data, LAMBDA, device):
+def calc_gradient_penalty(netD, real_data, fake_data, segmap, LAMBDA, device):
     alpha = torch.rand(1, 1)
     alpha = alpha.expand(real_data.size())
     alpha = alpha.to(device)
@@ -50,7 +50,7 @@ def calc_gradient_penalty(netD, real_data, fake_data, LAMBDA, device):
     interpolates = interpolates
     interpolates = torch.autograd.Variable(interpolates, requires_grad=True)
 
-    disc_interpolates = netD(interpolates)
+    disc_interpolates = netD(interpolates, segmap)
 
     gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
                                     grad_outputs=torch.ones(disc_interpolates.size()).to(device),
