@@ -28,6 +28,8 @@ def get_arguments():
     parser.add_argument("--pseudo_root", type=str, default='', help="Path to the directory containing the pseudo target labels.")
     parser.add_argument("--trg_data_list", type=str, default='./dataset/cityscapes_list/', help="Path to folder that contains a file with a list of images from the target dataset. File named set.txt, where set is train/val/test.")
     parser.add_argument("--num_workers", type=int, default=8, help="Number of threads for each worker")
+    parser.add_argument("--sit_dataset_path", type=str, default=None, help="Path to save sit generated dataset")
+    parser.add_argument("--trained_msc_model_path", type=str, default=None, help="Path to trained dataset")
 
     # networks parameters:
     parser.add_argument('--batch_size', type=int, default=1)

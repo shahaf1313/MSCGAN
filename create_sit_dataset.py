@@ -1,5 +1,5 @@
+SYNTHIA_SIZE=(760,1280)
 def main(opt):
-    opt.curr_scale = opt.semseg_train_scale
     model = torch.load(opt.trained_msc_model_path)
     for i in range(len(model)):
         model[i].eval()
@@ -12,6 +12,7 @@ def main(opt):
         for i in range(len(source_scales)):
             source_scales[i] = source_scales[i].to(opt.device)
         sit_batch = concat_pyramid_eval(model, source_scales, opt)
+        sit_batch = torch.nn.functional.interpolate(sit_batch, size=SYNTHIA_SIZE)
         for i, filename in enumerate(filenames):
             # output_sit_image = denorm(sit_batch[i]).detach().cpu().numpy()
             # output_sit_image = np.round(np.moveaxis(output_sit_image, 0, -1) * 255).astype(np.uint8)
