@@ -1,16 +1,26 @@
 def main(opt):
     opt.curr_scale = opt.semseg_source_scale
     opt.num_scales=2
+    opt.curr_scale=opt.num_scales
     opt.scale_factor = 0.5
     opt.num_steps=250e3
     source_train_loader = CreateSrcDataLoader(opt, 'train_semseg_net', get_image_label_pyramid=True)
     source_val_loader = CreateSrcDataLoader(opt, 'val_semseg_net', get_image_label_pyramid=True)
     opt.epoch_size = len(source_train_loader.dataset)
     opt.save_pics_rate = set_pics_save_rate(opt.pics_per_epoch, opt.batch_size, opt)
-    semseg_net, semseg_optimizer = CreateSemsegModel(opt)
-    semseg_net = torch.nn.DataParallel(semseg_net)
-    semseg_schedualer = PolynomialLR(semseg_optimizer, max_iter=opt.num_steps, gamma=0.9)
-
+    if opt.continue_train_from_path != '':
+        _, semseg_optimizer = CreateSemsegModel(opt)
+        semseg_net = torch.nn.DataParallel(torch.load(opt.continue_train_from_path))
+        semseg_schedualer = PolynomialLR(semseg_optimizer, max_iter=opt.num_steps, gamma=0.9)
+        semseg_schedualer.step(opt.resume_step)
+    else:
+        semseg_net, semseg_optimizer = CreateSemsegModel(opt)
+        semseg_net = torch.nn.DataParallel(semseg_net)
+        semseg_schedualer = PolynomialLR(semseg_optimizer, max_iter=opt.num_steps, gamma=0.9)
+    print('########################### Configuration ##############################')
+    for arg in vars(opt):
+        print(arg + ': ' + str(getattr(opt, arg)))
+    print('########################################################################')
     print('Architecture of Semantic Segmentation network:\n' + str(semseg_net.module))
     opt.tb = SummaryWriter(os.path.join(opt.tb_logs_dir, '%sGPU%d' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])))
 

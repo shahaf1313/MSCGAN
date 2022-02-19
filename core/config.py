@@ -15,6 +15,7 @@ def get_arguments():
     parser.add_argument('--manualSeed', default=1337, type=int, help='manual seed')
     parser.add_argument('--continue_train_from_path', type=str, help='Path to folder that contains all networks and continues to train from there', default='')
     parser.add_argument('--resume_to_epoch', default=1, type=int, help='Resumes training from specified epoch')
+    parser.add_argument('--resume_step', default=1, type=int, help='Resumes Semseg training to specified step')
     parser.add_argument('--nc_im', type=int, help='image # channels', default=3)
     parser.add_argument('--no_drop_last', default=True, action='store_false', help='When this flag turns on, last batch is not dropped. Regular behavour: drops last batch in training mode.')
 
