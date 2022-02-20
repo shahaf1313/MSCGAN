@@ -18,6 +18,8 @@ def get_arguments():
     parser.add_argument('--resume_step', default=1, type=int, help='Resumes Semseg training to specified step')
     parser.add_argument('--nc_im', type=int, help='image # channels', default=3)
     parser.add_argument('--no_drop_last', default=True, action='store_false', help='When this flag turns on, last batch is not dropped. Regular behavour: drops last batch in training mode.')
+    parser.add_argument("--sit_dataset_path", type=str, default=None, help="Path to save sit generated dataset")
+    parser.add_argument("--trained_msc_model_path", type=str, default=None, help="Path to trained dataset")
 
     # Dataset parameters:
     parser.add_argument("--source", type=str, default='gta5', help="source dataset : gta5 or synthia")
@@ -47,9 +49,9 @@ def get_arguments():
     parser.add_argument('--padd_size', type=int, help='net pad size', default=1)  # math.floor(opt.ker_size/2)
 
     # pyramid parameters:
-    parser.add_argument('--scale_factor', type=float, help='pyramid scale factor', default=0.75)  # pow(0.5,1/6))
+    parser.add_argument('--scale_factor', type=float, help='pyramid scale factor', default=0.5)  # pow(0.5,1/6))
     parser.add_argument('--use_half_image_size', default=False, action='store_true')
-    parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=None)
+    parser.add_argument('--num_scales', type=int, help='number of scales in the pyramid', default=2)
     parser.add_argument('--groups_num', type=int, help='number of groups in Group Norm', default=None)
     parser.add_argument('--base_channels_list', type=int, nargs='+', help='number of channels in the generator and discriminator.', default=[])
 

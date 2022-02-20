@@ -1,7 +1,5 @@
 NUM_CLASSES = 19
 IGNORE_LABEL = 255
-IMG_PIXELS_NUM = 512*1024*3
-MAX_CHANNELS_PER_LAYER = 48
 H = 512
 W = 1024
 
@@ -14,10 +12,10 @@ for i in range(zero_pad):
 
 IMG_CROP_SIZE_SEMSEG = (1024, 512)
 IMG_CROP_SIZE_IM2IM = (256, 256)
+IMG_SIZE_SOURCE = {'gta': (1914, 1052), 'synthia':(1280, 760)}
 IMG_RESIZE = (1280, 720)
 BEST_MIOU = 0.
-# image_sizes = {'cityscapes': (1024,512), 'gta5': (1280, 720), 'synthia': (1280, 760)}
-# cs_size_test = {'cityscapes': (1344,576)}
+
 
 
 

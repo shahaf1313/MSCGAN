@@ -524,6 +524,21 @@ def concat_pyramid(Gs, sources, opt):
             G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
     return G_z.detach()
 
+def concat_pyramid_eval(Gs, sources, opt):
+    if len(Gs) == 0:
+        return torch.zeros_like(sources[0])
+    # with torch.no_grad():
+    G_z = sources[0]
+    # labels = [None] * len(sources) if labels == None else labels
+    for G, source_curr, source_next in zip(Gs, sources, sources[1:]):
+        G_z = G_z[:, :, 0:source_curr.shape[2], 0:source_curr.shape[3]]
+        G_z = G(source_curr, G_z.detach())
+        # G_z = imresize(G_z, 1 / opt.scale_factor, opt)
+        G_z = imresize_torch(G_z, 1 / opt.scale_factor, mode='bicubic')
+        G_z = G_z[:, :, 0:source_next.shape[2], 0:source_next.shape[3]]
+    G_z = Gs[-1](sources[-1], G_z.detach())
+    return G_z.detach()
+
 def generate_image(netG, curr_images, Gs, scales, cond_image, opt):
     with torch.no_grad():
         prevs = concat_pyramid(Gs, scales, opt)
