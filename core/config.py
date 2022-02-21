@@ -75,6 +75,7 @@ def get_arguments():
     parser.add_argument('--tv_weight', type=float, help='tv loss weight', default=1.0/30)
 
     # Semseg network parameters:
+    parser.add_argument("--no_semseg", default=False, action='store_true', help="Disables semseg loss (cyclic label loss, CE on SIT images) at last scale.")
     parser.add_argument("--model", type=str, required=False, default='DeepLabV2', help="available options : DeepLabV2, DeepLab and VGG")
     parser.add_argument("--num_classes", type=int, required=False, default=19, help="Number of classes in the segmentation task. Default - 19")
     parser.add_argument("--ignore_threshold", type=float, required=False, default=0.5, help="Threshold probability to accept label conditioning of the semseg network.")

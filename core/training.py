@@ -56,7 +56,7 @@ def train(opt):
             Dst_curr, Gst_curr = init_models(opt)
             Dts_curr, Gts_curr = init_models(opt)
 
-        if opt.last_scale and semseg_cs==None:  # Last scale, add semseg network:
+        if not opt.no_semseg and opt.last_scale and semseg_cs==None:  # Last scale, add semseg network:
             semseg_cs, _ = CreateSemsegModel(opt)
 
         if len(opt.gpus) > 1:
@@ -70,11 +70,11 @@ def train(opt):
             # todo: for now, decided to use GroupNorm instead of BN, so not using sync BN!
             Dst_curr, Gst_curr = nn.DataParallel(Dst_curr), nn.DataParallel(Gst_curr)
             Dts_curr, Gts_curr = nn.DataParallel(Dts_curr), nn.DataParallel(Gts_curr)
-            if opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
+            if not opt.no_semseg and opt.last_scale: #Last scale, convert also the semseg network to DP+SBN:
                 semseg_cs = nn.DataParallel(semseg_cs)
 
         print(Dst_curr), print(Gst_curr), print(Dts_curr), print(Gts_curr)
-        if opt.last_scale:  # Last scale, print semseg network:
+        if not opt.no_semseg and opt.last_scale:  # Last scale, print semseg network:
             print(semseg_cs)
         scale_nets = train_single_scale(Dst_curr, Gst_curr, Dts_curr, Gts_curr, Gst, Gts, Dst, Dts,
                                         opt, resume=resume_first_iteration, epoch_num_to_resume=opt.resume_to_epoch,
@@ -109,12 +109,12 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
     optimizerGst = optim.Adam(netGst.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
     optimizerDts = optim.Adam(netDts.parameters(), lr=opt.lr_d, betas=(opt.beta1, 0.999))
     optimizerGts = optim.Adam(netGts.parameters(), lr=opt.lr_g, betas=(opt.beta1, 0.999))
-    if opt.last_scale:
+    if not opt.no_semseg and opt.last_scale:
         optimizerSemsegCS = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg, momentum=opt.momentum,
                                     weight_decay=opt.weight_decay)
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
-        if opt.source == 'gta':
+        if opt.source == 'gta5':
             semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
         elif opt.source == 'synthia':
             semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_synthia_miou_60)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_synthia_miou_60)
@@ -162,7 +162,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             netGst.train()
             netDts.train()
             netGts.train()
-            if opt.last_scale:
+            if not opt.no_semseg and opt.last_scale:
                 semseg_cs.train()
 
             # Move scale and label tensors to CUDA:
@@ -179,8 +179,8 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                     target_scales[i] = torch.clamp(nn.functional.interpolate(target_scales[i], scale_factor=[0.5, 0.5], mode='bicubic'), -1, 1)
 
             # Create segmentation maps if needed:
-            source_label = source_label if opt.last_scale else None
-            source_segmap = one_hot_encoder(source_label) if opt.last_scale else None
+            source_label = source_label if not opt.no_semseg and opt.last_scale else None
+            source_segmap = one_hot_encoder(source_label) if not opt.no_semseg and opt.last_scale else None
             # target_softs = (semseg_cs(target_scales[-1])).detach() if opt.last_scale and not opt.warmup else None
             # target_segmap = encode_semseg_out(target_softs, opt.ignore_threshold) if opt.last_scale and not opt.warmup else None
 
@@ -224,7 +224,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 # train generator networks between domains (S->T, T->S)
                 optimizerGst.zero_grad()
                 optimizerGts.zero_grad()
-                if opt.last_scale and not opt.warmup:
+                if not opt.no_semseg and opt.last_scale and not opt.warmup:
                     optimizerSemsegGen.zero_grad()
                     # optimizerSemsegGTA.zero_grad()
 
@@ -255,7 +255,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
 
                 optimizerGst.step()
                 optimizerGts.step()
-                if opt.last_scale and not opt.warmup:
+                if not opt.no_semseg and opt.last_scale and not opt.warmup:
                     optimizerSemsegGen.step()
                     # optimizerSemsegGTA.step()
 
@@ -264,7 +264,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
             ############################
             # (3) Update semantic segmentation network: minimize CE Loss on converted images (Use GT of source domain):
             ###########################
-            if opt.last_scale:
+            if not opt.no_semseg and opt.last_scale:
                 optimizerSemsegCS.zero_grad()
                 if not opt.warmup:
                     optimizerGst.zero_grad()
@@ -311,7 +311,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
                 opt.tb.add_image('Scale%d/Cyclic/target_in_source' % opt.curr_scale, tis, save_pics_int * opt.save_pics_rate)
                 opt.tb.add_image('Scale%d/Cyclic/target_in_source_in_target' % opt.curr_scale, tisit, save_pics_int * opt.save_pics_rate)
 
-                if opt.last_scale:
+                if not opt.no_semseg and opt.last_scale:
                     sit_label = colorize_mask(semseg_labels[0])
                     softs_max = torch.nn.functional.softmax(semseg_softs, dim=1)
                     hist_values = softs_max.max(dim=1)[0][0]
@@ -347,7 +347,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         ############################
         # (5) Validate performance after each epoch if we are at the last scale:
         ############################
-        if opt.last_scale:
+        if not opt.no_semseg and opt.last_scale:
             iou, miou, cm = calculte_validation_accuracy(semseg_cs, opt.target_validation_loader, epoch_num, opt)
             export_epoch_accuracy(opt, iou, miou, cm, epoch_num)
             if miou > opt.best_miou:
@@ -450,10 +450,10 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
     loss_sts = criterion_sts(sitis_image, source_batch)
     losses['LossSTS'] = loss_sts.item()
     loss_sts *= opt.lambda_cyclic
-    loss_sts.backward(retain_graph=opt.last_scale)
+    loss_sts.backward(retain_graph=not opt.no_semseg and opt.last_scale)
 
     # Source Cyclic Label Loss:
-    if opt.last_scale and not opt.warmup:
+    if not opt.no_semseg and opt.last_scale and not opt.warmup:
         softs_source_labels, loss_source_labels = semseg_gta(sitis_image, source_label)
         losses['SourceLabelLoss'] = loss_source_labels.item()
         images['sitis_softs'] = softs_source_labels
@@ -475,10 +475,10 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
     loss_tst = criterion_tst(tisit_image, target_batch)
     losses['LossTST'] = loss_tst.item()
     loss_tst *= opt.lambda_cyclic
-    loss_tst.backward(retain_graph=opt.last_scale and not opt.warmup)
+    loss_tst.backward(retain_graph=not opt.no_semseg and opt.last_scale and not opt.warmup)
 
     # Target Label Cyclic Loss:
-    if opt.use_target_label_loss and opt.last_scale and not opt.warmup:
+    if not opt.no_semseg and opt.use_target_label_loss and opt.last_scale and not opt.warmup:
         with torch.no_grad():
             tis_softs = semseg_gta(tis_image)
             tis_label = tis_softs.argmax(1).detach()
