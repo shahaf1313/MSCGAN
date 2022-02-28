@@ -24,7 +24,8 @@ def main(opt):
     print('Architecture of Semantic Segmentation network:\n' + str(semseg_net.module))
     opt.tb = SummaryWriter(os.path.join(opt.tb_logs_dir, '%sGPU%d' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])))
 
-    steps = 0
+    best_miou = 0
+    steps = 0 if opt.continue_train_from_path == '' else opt.resume_step
     print_int = 0
     save_pics_int = 0
     epoch_num = 1
@@ -73,8 +74,9 @@ def main(opt):
         print('train semseg: starting validation after epoch %d.' % epoch_num)
         iou, miou, cm = calculte_validation_accuracy(semseg_net, source_val_loader, opt, epoch_num)
         save_epoch_accuracy(opt.tb, 'Validtaion', iou, miou, epoch_num)
-        if epoch_num > 15:
-            torch.save(semseg_net.module, '%s/semseg_trained_on_gta.pth' % (opt.out_folder))
+        if epoch_num > 15 and miou > best_miou:
+            best_miou = miou
+            torch.save(semseg_net.module, '%s/semseg_trained_on_%s_miou_%.2f.pth' % (opt.out_folder, opt.source, miou))
         epoch_num += 1
 
     opt.tb.close()

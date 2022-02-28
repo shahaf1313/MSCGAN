@@ -18,8 +18,11 @@ def get_arguments():
     parser.add_argument('--resume_step', default=1, type=int, help='Resumes Semseg training to specified step')
     parser.add_argument('--nc_im', type=int, help='image # channels', default=3)
     parser.add_argument('--no_drop_last', default=True, action='store_false', help='When this flag turns on, last batch is not dropped. Regular behavour: drops last batch in training mode.')
+
+    #create new dataset configurations:
     parser.add_argument("--sit_dataset_path", type=str, default=None, help="Path to save sit generated dataset")
     parser.add_argument("--trained_msc_model_path", type=str, default=None, help="Path to trained dataset")
+    parser.add_argument('--skip_created_files', default=False, action='store_true', help='Skip already created files in the output directory.')
 
     # Dataset parameters:
     parser.add_argument("--source", type=str, default='gta5', help="source dataset : gta5 or synthia")
@@ -127,6 +130,7 @@ def post_config(opt):
         opt.args = args
         # init fixed parameters
         opt.pretrained_deeplabv2_on_gta_miou_70 =     r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.7mIoU_on_GTA.pth'
+        opt.pretrained_deeplabv2_on_synthia_miou_55 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.55mIoU_on_Synthia.pth'
         opt.pretrained_deeplabv2_on_synthia_miou_60 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.6mIoU_on_Synthia.pth'
 
         opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])

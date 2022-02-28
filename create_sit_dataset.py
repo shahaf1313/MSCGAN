@@ -7,7 +7,12 @@ def main(opt):
     opt.num_scales = opt.curr_scale = len(model)-1
     resize = IMG_SIZE_SOURCE[opt.source][::-1]
     source_train_loader = CreateSrcDataLoader(opt, get_filename=True, get_original_image=True)
-
+    if opt.skip_created_files:
+        already_created = next(os.walk(opt.sit_dataset_path))[2]
+        for f in already_created:
+            if f in source_train_loader.dataset.img_ids:
+                source_train_loader.dataset.img_ids.remove(f)
+    print('Number of images to convert: %d' % len(source_train_loader.dataset.img_ids))
     for source_scales, filenames in tqdm(source_train_loader):
         for i in range(len(source_scales)):
             source_scales[i] = source_scales[i].to(opt.device)
