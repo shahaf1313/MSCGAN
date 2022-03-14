@@ -36,6 +36,6 @@ class domainAdaptationDataSet(data.Dataset):
         return label_copy
 
     def GeneratePyramid(self, image, is_label=False):
-        scales_pyramid = GeneratePyramid(image, self.num_scales, self.curr_scale, self.scale_factor, self.crop_size, is_label=is_label)
+        scales_pyramid = GeneratePyramid(image, self.num_scales, self.curr_scale, self.scale_factor, is_label=is_label)
         return scales_pyramid
 

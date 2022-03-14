@@ -117,7 +117,7 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         if opt.source == 'gta5':
             semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
         elif opt.source == 'synthia':
-            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_synthia_miou_60)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_synthia_miou_60)
+            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_synthia_cropped)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_synthia_cropped)
             print('loaded synthia''s pretrained semseg.')
         else:
             raise NotImplemented()
@@ -442,7 +442,7 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
     sit_image = currGst(source_batch, prev_sit, source_segmap)
     images['sit'] = sit_image
     with torch.no_grad():
-        generated_pyramid_sit = GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
+        generated_pyramid_sit = GeneratePyramid(sit_image, opt.num_scales, opt.curr_scale, opt.scale_factor)
         prev_sit_generated = concat_pyramid(Gts_pyramid, generated_pyramid_sit, opt)
     # source in target in source:
     sitis_image = currGts(sit_image, prev_sit_generated, source_segmap)
@@ -467,7 +467,7 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
     tis_image = currGts(target_batch, prev_tis, None)
     images['tis'] = tis_image
     with torch.no_grad():
-        generated_pyramid_tis = GeneratePyramid(tis_image, opt.num_scales, opt.curr_scale, opt.scale_factor, opt.image_full_size)
+        generated_pyramid_tis = GeneratePyramid(tis_image, opt.num_scales, opt.curr_scale, opt.scale_factor)
         prev_tis_generated = concat_pyramid(Gst_pyramid, generated_pyramid_tis, opt)
     # target in source in target:
     tisit_image = currGst(tis_image, prev_tis_generated, None)

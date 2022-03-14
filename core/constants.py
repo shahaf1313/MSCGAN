@@ -12,8 +12,8 @@ for i in range(zero_pad):
 
 IMG_CROP_SIZE_SEMSEG = (1024, 512)
 IMG_CROP_SIZE_IM2IM = (256, 256)
-IMG_SIZE_SOURCE = {'gta5': (1914, 1052), 'synthia':(1280, 760)}
-IMG_RESIZE = (1280, 720)
+DATASETS_IMG_SIZE = {'gta5': (1914, 1052), 'synthia':(1280, 760), 'cityscapes':(2048,1024)}
+# IMG_RESIZE = (1280, 720)
 BEST_MIOU = 0.
 
 

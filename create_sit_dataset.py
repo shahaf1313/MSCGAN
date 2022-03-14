@@ -5,7 +5,6 @@ def main(opt):
         model[i] = torch.nn.DataParallel(model[i])
         model[i].to(opt.device)
     opt.num_scales = opt.curr_scale = len(model)-1
-    resize = IMG_SIZE_SOURCE[opt.source][::-1]
     source_train_loader = CreateSrcDataLoader(opt, get_filename=True, get_original_image=True)
     if opt.skip_created_files:
         already_created = next(os.walk(opt.sit_dataset_path))[2]
@@ -17,7 +16,6 @@ def main(opt):
         for i in range(len(source_scales)):
             source_scales[i] = source_scales[i].to(opt.device)
         sit_batch = concat_pyramid_eval(model, source_scales, opt)
-        sit_batch = torch.nn.functional.interpolate(sit_batch, size=resize, mode='bicubic')
         for i, filename in enumerate(filenames):
             save_image(norm_image(sit_batch[i]), os.path.join(opt.sit_dataset_path, filename))
     print('Finished Creating SIT Dataset.')
@@ -36,6 +34,5 @@ if __name__ == "__main__":
     from core.training import concat_pyramid_eval
     import os
     from torchvision.utils import save_image
-    from core.constants import IMG_SIZE_SOURCE
     main(opt)
 

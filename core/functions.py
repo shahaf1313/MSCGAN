@@ -159,12 +159,12 @@ def compute_iou_torch(confusion_matrix):
     miou = nanmean_torch(iou)
     return iou, miou
 
-def GeneratePyramid(image, num_scales, curr_scale, scale_factor, crop_size, is_label=False):
+def GeneratePyramid(image, num_scales, curr_scale, scale_factor, is_label=False):
     scales_pyramid = []
     if isinstance(image, Image.Image):
         for i in range(0, curr_scale + 1, 1):
             scale = math.pow(scale_factor, num_scales - i)
-            curr_size = (np.ceil(scale * np.array(crop_size))).astype(np.int)
+            curr_size = (np.ceil(scale * np.array(image.size))).astype(np.int)
             curr_scale_image = image.resize(curr_size, Image.BICUBIC if not is_label else Image.NEAREST)
             curr_scale_image = RGBImageToNumpy(curr_scale_image) if not is_label else ImageToNumpy(curr_scale_image)
             scales_pyramid.append(curr_scale_image)
