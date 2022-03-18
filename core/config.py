@@ -129,11 +129,11 @@ def post_config(opt):
             args += s + ' '
         opt.args = args
         # init fixed parameters
-        opt.pretrained_deeplabv2_on_gta_miou_70 =     r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.7mIoU_on_GTA.pth'
-        opt.pretrained_deeplabv2_on_synthia_miou_55 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.55mIoU_on_Synthia.pth'
-        opt.pretrained_deeplabv2_on_synthia_miou_60 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.6mIoU_on_Synthia.pth'
-        opt.pretrained_deeplabv2_on_synthia_cropped = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_cropped_Synthia.pth'
-
+        # opt.pretrained_deeplabv2_on_gta_miou_70 =     r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.7mIoU_on_GTA.pth'
+        # opt.pretrained_deeplabv2_on_synthia_miou_55 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.55mIoU_on_Synthia.pth'
+        # opt.pretrained_deeplabv2_on_synthia_miou_60 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/deeplabV2_GN_0.6mIoU_on_Synthia.pth'
+        opt.pretrained_deeplabv2_on_gta_miou_79     = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/semseg_trained_on_gta5_crops_miou_0.79.pth'
+        opt.pretrained_deeplabv2_on_synthia_miou_62 = r'/home/shahaf/MSCGAN/GoldenModels/deeplabV2_init/semseg_trained_on_synthia_crops_miou_0.62.pth'
         opt.folder_string = '%sGPU%d/' % (datetime.datetime.now().strftime('%d-%m-%Y::%H:%M:%S'), opt.gpus[0])
         opt.out_folder = '%s/%s' % (opt.checkpoints_dir, opt.folder_string)
 

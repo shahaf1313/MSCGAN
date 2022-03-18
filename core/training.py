@@ -115,10 +115,9 @@ def train_single_scale(netDst, netGst, netDts, netGts, Gst: list, Gts: list, Dst
         optimizerSemsegGen = optim.SGD(semseg_cs.module.optim_parameters(opt) if (len(opt.gpus) > 1) else semseg_cs.optim_parameters(opt), lr=opt.lr_semseg / 4,
                                        momentum=opt.momentum, weight_decay=opt.weight_decay)
         if opt.source == 'gta5':
-            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_70)
+            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_gta_miou_79)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_gta_miou_79)
         elif opt.source == 'synthia':
-            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_synthia_cropped)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_synthia_cropped)
-            print('loaded synthia''s pretrained semseg.')
+            semseg_pretrained_source = nn.DataParallel(torch.load(opt.pretrained_deeplabv2_on_synthia_miou_62)) if (len(opt.gpus) > 1) else torch.load(opt.pretrained_deeplabv2_on_synthia_miou_62)
         else:
             raise NotImplemented()
         # semseg_pretrained_source = nn.DataParallel(semseg_pretrained_source) if (len(opt.gpus) > 1) else torch.load(semseg_pretrained_source)
