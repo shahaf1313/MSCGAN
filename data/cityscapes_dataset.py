@@ -17,20 +17,26 @@ class cityscapesDataSet(domainAdaptationDataSet):
         name = self.img_ids[index]
         image = Image.open(osp.join(   self.root, "leftImg8bit/%s/%s" % (self.set, name)   )).convert('RGB')
         # image = image.resize(self.crop_size, Image.BICUBIC)
-        left = self.source_image_size[0]-self.crop_size[0]
-        upper= self.source_image_size[1]-self.crop_size[1]
-        left = np.random.randint(0, high=left)
-        upper= np.random.randint(0, high=upper)
-        right= left + self.crop_size[0]
-        lower= upper+ self.crop_size[1]
-        image = image.crop((left, upper, right, lower))
+        if self.set == 'val' or self.set == 'test':
+            pass
+        else:
+            left = self.source_image_size[0]-self.crop_size[0]
+            upper= self.source_image_size[1]-self.crop_size[1]
+            left = np.random.randint(0, high=left)
+            upper= np.random.randint(0, high=upper)
+            right= left + self.crop_size[0]
+            lower= upper+ self.crop_size[1]
+            image = image.crop((left, upper, right, lower))
 
         scales_pyramid, label, label_copy = None, None, None
         if self.get_image_label:
             lbname = name.replace("leftImg8bit", "gtFine_labelIds")
             label = Image.open(osp.join(   self.root, "gtFine/%s/%s" % (self.set, lbname)   ))
             # label = label.resize( self.crop_size, Image.NEAREST )
-            label = label.crop((left, upper, right, lower))
+            if self.set == 'val' or self.set == 'test':
+                pass
+            else:
+                label = label.crop((left, upper, right, lower))
             assert image.size == label.size
             label = np.asarray(label, np.float32)
             label_copy = self.ignore_label * np.ones(label.shape, dtype=np.float32)
