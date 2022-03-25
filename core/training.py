@@ -454,6 +454,7 @@ def cycle_consistency_loss(source_scales, currGst, Gst_pyramid,
     # Source Cyclic Label Loss:
     if not opt.no_semseg and opt.last_scale and not opt.warmup:
         softs_source_labels, loss_source_labels = semseg_gta(sitis_image, source_label)
+        loss_source_labels = loss_source_labels.mean()
         losses['SourceLabelLoss'] = loss_source_labels.item()
         images['sitis_softs'] = softs_source_labels
         loss_source_labels *= opt.lambda_labels
