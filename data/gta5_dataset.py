@@ -2,13 +2,13 @@ import os.path as osp
 from data.domainAdaptationDataset import domainAdaptationDataSet
 from PIL import Image
 import numpy as np
-from core.constants import DATASETS_IMG_SIZE
+from core.constants import DATASETS_IMG_SIZE, RESIZE_SHAPE
 
 class GTA5DataSet(domainAdaptationDataSet):
     def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_image_label_pyramid=False, get_filename=False, get_original_image=False):
         super(GTA5DataSet, self).__init__(root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
-        # self.resize = IMG_RESIZE
-        self.source_image_size = DATASETS_IMG_SIZE['gta5']
+        self.domain_resize = RESIZE_SHAPE['gta5']
+        # self.source_image_size = DATASETS_IMG_SIZE['gta5']
         self.get_image_label_pyramid = get_image_label_pyramid
         self.get_filename = get_filename
         self.get_original_image = get_original_image
@@ -26,9 +26,9 @@ class GTA5DataSet(domainAdaptationDataSet):
             # image = image.resize(self.resize, Image.BICUBIC) #last version
             pass
         else: # use random crop:
-            # image = image.resize(self.resize, Image.BICUBIC)
-            left = self.source_image_size[0]-self.crop_size[0]
-            upper= self.source_image_size[1]-self.crop_size[1]
+            image = image.resize(self.domain_resize, Image.BICUBIC)
+            left = self.domain_resize[0]-self.crop_size[0]
+            upper= self.domain_resize[1]-self.crop_size[1]
             left = np.random.randint(0, high=left)
             upper= np.random.randint(0, high=upper)
             right= left + self.crop_size[0]
@@ -42,7 +42,7 @@ class GTA5DataSet(domainAdaptationDataSet):
                 # label = label.resize(self.crop_size, Image.NEAREST)
                 pass
             else: # use random crop
-                # label = label.resize(self.resize, Image.NEAREST)
+                label = label.resize(self.domain_resize, Image.NEAREST)
                 label = label.crop((left, upper, right, lower))
             if self.get_image_label_pyramid:
                 labels_pyramid =  self.GeneratePyramid(label, is_label=True)

@@ -4,12 +4,12 @@ import numpy as np
 import imageio
 imageio.plugins.freeimage.download()
 from .domainAdaptationDataset import domainAdaptationDataSet
-from core.constants import DATASETS_IMG_SIZE
+from core.constants import DATASETS_IMG_SIZE, RESIZE_SHAPE
 class SynthiaDataSet(domainAdaptationDataSet):
     def __init__(self, root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=False, get_image_label_pyramid=False, get_filename=False, get_original_image=False):
         super(SynthiaDataSet, self).__init__(root, images_list_path, scale_factor, num_scales, curr_scale, set, get_image_label=get_image_label)
-        # self.resize = IMG_RESIZE
-        self.source_image_size = DATASETS_IMG_SIZE['synthia']
+        self.domain_resize = RESIZE_SHAPE['synthia']
+        # self.source_image_size = DATASETS_IMG_SIZE['synthia']
         self.get_image_label_pyramid = get_image_label_pyramid
         self.get_filename = get_filename
         self.get_original_image = get_original_image
@@ -27,9 +27,9 @@ class SynthiaDataSet(domainAdaptationDataSet):
             # image = image.resize(self.crop_size, Image.BICUBIC) #last version
             pass
         else: # use random crop:
-            # image = image.resize(self.resize, Image.BICUBIC)
-            left = self.source_image_size[0]-self.crop_size[0]
-            upper= self.source_image_size[1]-self.crop_size[1]
+            image = image.resize(self.domain_resize, Image.BICUBIC)
+            left = self.domain_resize[0]-self.crop_size[0]
+            upper= self.domain_resize[1]-self.crop_size[1]
             left = np.random.randint(0, high=left)
             upper= np.random.randint(0, high=upper)
             right= left + self.crop_size[0]
@@ -45,7 +45,7 @@ class SynthiaDataSet(domainAdaptationDataSet):
                 # label = label.resize(self.crop_size, Image.NEAREST)
                 pass
             else: # use random crop
-                # label = label.resize(self.resize, Image.NEAREST)
+                label = label.resize(self.domain_resize, Image.NEAREST)
                 label = label.crop((left, upper, right, lower))
             if self.get_image_label_pyramid:
                 labels_pyramid =  self.GeneratePyramid(label, is_label=True)

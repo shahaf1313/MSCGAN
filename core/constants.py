@@ -13,6 +13,8 @@ for i in range(zero_pad):
 IMG_CROP_SIZE_SEMSEG = (1024, 512)
 IMG_CROP_SIZE_IM2IM = (256, 256)
 DATASETS_IMG_SIZE = {'gta5': (1914, 1052), 'synthia':(1280, 760), 'cityscapes':(2048,1024)}
+# resize factors (keep aspect ratio before crop): gta5=1.7, synthia=1.15, cityscapes=2
+RESIZE_SHAPE = {'gta5': (1126, 619), 'synthia':(1113, 661), 'cityscapes':(1024,512)}
 # IMG_RESIZE = (1280, 720)
 BEST_MIOU = 0.
 
