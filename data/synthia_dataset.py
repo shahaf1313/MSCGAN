@@ -60,4 +60,4 @@ class SynthiaDataSet(domainAdaptationDataSet):
         elif self.get_image_label_pyramid:
             return scales_pyramid, labels_pyramid
         else:
-            return scales_pyramid if not self.get_filename else scales_pyramid, self.img_ids[index]
+            return scales_pyramid if not self.get_filename else (scales_pyramid, self.img_ids[index])

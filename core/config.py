@@ -23,6 +23,9 @@ def get_arguments():
     parser.add_argument("--sit_dataset_path", type=str, default=None, help="Path to save sit generated dataset")
     parser.add_argument("--trained_msc_model_path", type=str, default=None, help="Path to trained dataset")
     parser.add_argument('--skip_created_files', default=False, action='store_true', help='Skip already created files in the output directory.')
+    parser.add_argument("--gta_models_path", type=str, default=None, help="Path to trained models gta->cs")
+    parser.add_argument("--syn_models_path", type=str, default=None, help="Path to trained models syn->cs")
+    parser.add_argument("--gifs_out_path", type=str, default=None, help="Path to output gifs")
 
     # Dataset parameters:
     parser.add_argument("--source", type=str, default='gta5', help="source dataset : gta5 or synthia")
